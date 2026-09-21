@@ -1,0 +1,3 @@
+ALTER TABLE "resources" ADD COLUMN "assessment_version_id" uuid;--> statement-breakpoint
+ALTER TABLE "resources" ADD CONSTRAINT "resources_assessment_version_id_assessment_versions_id_fk" FOREIGN KEY ("assessment_version_id") REFERENCES "public"."assessment_versions"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "resources_version_idx" ON "resources" USING btree ("assessment_version_id");

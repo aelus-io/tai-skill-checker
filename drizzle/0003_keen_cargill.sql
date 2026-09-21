@@ -1,0 +1,1 @@
+ALTER TABLE "assessments" ADD CONSTRAINT "assessments_current_published_version_id_assessment_versions_id_fk" FOREIGN KEY ("current_published_version_id") REFERENCES "public"."assessment_versions"("id") ON DELETE set null ON UPDATE no action;
