@@ -11,6 +11,9 @@ import type { Database } from './db/index.js'
 import type { Auth } from './modules/auth/index.js'
 import { createAssessmentGenerator, createAssessmentService } from './modules/assessments/index.js'
 import { createInvitationService } from './modules/invitations/index.js'
+import { createAttemptService } from './modules/attempts/index.js'
+import { createLiveKitService } from './modules/livekit/index.js'
+import { createRecordingService } from './modules/recordings/index.js'
 import { createNotificationService } from './modules/notifications/index.js'
 import { createOrganizationService } from './modules/organizations/index.js'
 import { createResourceService } from './modules/resources/index.js'
@@ -20,6 +23,7 @@ import { ForbiddenError } from './http/errors.js'
 import { createRequireAuth, requireRole } from './http/middleware/auth.js'
 import { createAssessmentRouter } from './http/routes/assessments.js'
 import { createInvitationRouter } from './http/routes/invitations.js'
+import { createAttemptRouter } from './http/routes/attempts.js'
 
 export function createApp(dependencies: { config: AppConfig; db: Database; auth: Auth; logger: Logger }) {
   const { config, db, auth, logger } = dependencies
@@ -56,6 +60,16 @@ export function createApp(dependencies: { config: AppConfig; db: Database; auth:
 
   // Better Auth must receive the request before Express consumes its body.
   app.all('/api/auth/*splat', toNodeHandler(auth))
+  const attempts = createAttemptService(db, config.maxAssessmentAttempts)
+  const livekit = createLiveKitService(db, config)
+  const recordings = createRecordingService(db, config)
+  app.post('/api/webhooks/livekit', express.text({ type: '*/*', limit: '1mb' }), async (request, response) => {
+    const event = await livekit.receiveWebhook(request.body as string, request.headers.authorization)
+    await livekit.applyRecordingWebhook(event)
+    const employeeLeft = event.event === 'participant_left' && event.participant?.identity.startsWith('employee-')
+    if ((employeeLeft || event.event === 'room_finished') && event.room?.name) await attempts.abandonByRoom(event.room.name, event.id)
+    response.sendStatus(204)
+  })
   app.use(express.json({ limit: '1mb' }))
 
   const assessments = createAssessmentService(db)
@@ -83,6 +97,7 @@ export function createApp(dependencies: { config: AppConfig; db: Database; auth:
   })
 
   app.use('/api/invitations', createInvitationRouter(invitations, auth))
+  app.use('/api', requireAuth, createAttemptRouter({ attempts, livekit, recordings }))
   app.use('/api/assessments', requireAuth, requireRole('ADMIN'), createAssessmentRouter({ assessments, resources, generator, invitations, config }))
 
   app.use(notFoundHandler)

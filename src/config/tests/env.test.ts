@@ -18,4 +18,10 @@ describe('environment configuration', () => {
   it('requires a sender address when Resend is enabled', () => {
     expect(() => loadConfig({ ...valid, RESEND_API_KEY: 're_test' })).toThrow()
   })
+
+  it('treats blank optional provider settings as unconfigured', () => {
+    const config = loadConfig({ ...valid, LIVEKIT_URL: '', LIVEKIT_API_KEY: '', LIVEKIT_API_SECRET: '', R2_ENDPOINT: '', R2_ACCESS_KEY_ID: '', R2_SECRET_ACCESS_KEY: '', R2_BUCKET_NAME: '' })
+    expect(config.livekitUrl).toBeUndefined()
+    expect(config.r2Endpoint).toBeUndefined()
+  })
 })

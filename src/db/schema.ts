@@ -28,6 +28,7 @@ export const attemptStatusEnum = pgEnum('attempt_status', ['READY', 'IN_PROGRESS
 export const attemptSpeakerEnum = pgEnum('attempt_speaker', ['EMPLOYEE', 'AGENT', 'SYSTEM'])
 export const resourceStatusEnum = pgEnum('resource_status', ['UPLOADED', 'PROCESSING', 'READY', 'FAILED'])
 export const evaluationStatusEnum = pgEnum('evaluation_status', ['PENDING', 'PROCESSING', 'COMPLETED', 'FAILED'])
+export const recordingStatusEnum = pgEnum('recording_status', ['STARTING', 'ACTIVE', 'COMPLETED', 'FAILED'])
 
 export const organizations = pgTable('organizations', {
   id: id(),
@@ -206,6 +207,7 @@ export const resourceChunks = pgTable('resource_chunks', {
   id: id(),
   organizationId: uuid('organization_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
   assessmentId: uuid('assessment_id').notNull().references(() => assessments.id, { onDelete: 'cascade' }),
+  assessmentVersionId: uuid('assessment_version_id').references(() => assessmentVersions.id, { onDelete: 'cascade' }),
   resourceId: uuid('resource_id').notNull().references(() => resources.id, { onDelete: 'cascade' }),
   position: integer('position').notNull(),
   content: text('content').notNull(),
@@ -214,6 +216,7 @@ export const resourceChunks = pgTable('resource_chunks', {
 }, (table) => [
   uniqueIndex('resource_chunks_resource_position_uidx').on(table.resourceId, table.position),
   index('resource_chunks_scope_idx').on(table.organizationId, table.assessmentId),
+  index('resource_chunks_version_idx').on(table.assessmentVersionId),
 ])
 
 export const invitations = pgTable('invitations', {
@@ -310,11 +313,15 @@ export const recordings = pgTable('recordings', {
   organizationId: uuid('organization_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
   attemptId: uuid('attempt_id').notNull().references(() => attempts.id, { onDelete: 'restrict' }),
   storageKey: text('storage_key').notNull(),
+  egressId: text('egress_id').notNull(),
+  status: recordingStatusEnum('status').notNull().default('STARTING'),
   mimeType: text('mime_type').notNull(),
   byteSize: integer('byte_size'),
   durationSeconds: integer('duration_seconds'),
+  errorMessage: text('error_message'),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
   createdAt: createdAt(),
-}, (table) => [uniqueIndex('recordings_attempt_uidx').on(table.attemptId)])
+}, (table) => [uniqueIndex('recordings_attempt_uidx').on(table.attemptId), uniqueIndex('recordings_egress_uidx').on(table.egressId)])
 
 export const evaluations = pgTable('evaluations', {
   id: id(),

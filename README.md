@@ -1,6 +1,6 @@
 # TAI Skill Checker Backend
 
-Phase 1 backend for creating, publishing, and assigning AI skill assessments.
+Backend for creating, assigning, and running realtime AI skill assessments.
 
 ## Stack
 
@@ -10,10 +10,13 @@ Phase 1 backend for creating, publishing, and assigning AI skill assessments.
 - Gemini structured generation
 - Resend invitation delivery
 - Pino logging, Zod validation, Vitest
+- LiveKit rooms, agent dispatch, audio egress, and verified webhooks
+- Gemini Live interviewer and Gemini embeddings
+- Private Cloudflare R2 recordings
 
 ## Setup
 
-1. Copy `.env.example` to `.env` and configure `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, and `FRONTEND_URL`. Add the Gemini key for generation and the Resend key and sender for invitations.
+1. Copy `.env.example` to `.env` and configure the database and auth settings. Realtime assessments also require Gemini, LiveKit, and all R2 settings. Resend is required for invitations.
 2. Install dependencies and migrate a clean Neon database:
 
    ```sh
@@ -27,6 +30,7 @@ Phase 1 backend for creating, publishing, and assigning AI skill assessments.
 
    ```sh
    npm run dev
+   npm run agent:dev
    npm run typecheck
    npm test
    npm run build
@@ -76,10 +80,21 @@ All admin endpoints require a Better Auth session cookie and an `ADMIN` organiza
 | `POST` | `/api/assessments/:id/invitations` | Create assignments and send email invitations |
 | `GET` | `/api/invitations/:token` | Read employee safe invitation preview |
 | `POST` | `/api/invitations/:token/accept` | Bind the assignment to the matching signed in employee |
+| `GET` | `/api/assignments/:id/preparation` | Read preparation details without consuming an attempt |
+| `POST` | `/api/assignments/:id/attempts` | Atomically consume an attempt and start its LiveKit session |
+| `GET` | `/api/admin/attempts/active` | List live attempts for the organization |
+| `GET` | `/api/admin/attempts/:id` | Read scenario progress, transcript, and lifecycle events |
+| `POST` | `/api/admin/attempts/:id/observer-token` | Create a short lived, listen only admin token |
+| `GET` | `/api/admin/attempts/:id/recording` | Create a short lived R2 playback URL |
+| `POST` | `/api/webhooks/livekit` | Receive signed LiveKit lifecycle and egress events |
 
 Generation accepts a `brief` and optional `sourceText`. It returns and persists editable scenarios, competencies, mappings, and rubrics. Publication requires every scenario to have a valid competency mapping and every competency to have a rubric.
 
 Invitation recipients follow the emailed link, create or sign into a Better Auth account with the invited email, then accept the invitation. Acceptance consumes the invitation secret, creates the employee membership, and binds the assignment to that user. Preview responses expose competencies but omit scenarios and rubrics.
+
+PDF uploads are extracted, chunked, embedded, and stored in pgvector when Gemini is configured. A failed or previously unconfigured resource can be retried with `POST /api/assessments/:assessmentId/resources/:resourceId/process`. Publication requires every uploaded resource to be ready and snapshots its chunks into the immutable version.
+
+Run the API and agent worker as separate processes. Starting an attempt creates `assessment-attempt-{attemptId}`, dispatches the named worker, begins audio only egress to private R2, and returns a five minute employee token. Leaving the room makes an active attempt `ABANDONED`; a new start consumes the next attempt. Calling the agent's completion tool locks the assignment and moves the attempt to `PROCESSING` for Phase 3 evaluation.
 
 ## Domain guarantees
 
@@ -90,4 +105,8 @@ Invitation recipients follow the emailed link, create or sign into a Better Auth
 - Assignments always reference the exact published version used for the invitation.
 - Invitation tokens are random, stored as SHA-256 hashes, expire, and are rotated after acceptance.
 - PDF uploads validate both MIME type and the PDF file signature and are stored outside the public web root.
+- Attempt numbers are allocated while holding an assignment row lock, so the configured limit remains safe under concurrent starts.
+- Resource retrieval includes organization, assessment, and exact published version scope.
+- Employee tokens can publish audio; admin observer tokens are hidden and cannot publish media or data.
+- LiveKit webhook signatures are verified before lifecycle or recording state changes.
 - Provider secrets, invitation tokens, cookies, and authorization headers are redacted from logs.

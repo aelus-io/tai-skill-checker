@@ -149,6 +149,13 @@ export function createAssessmentRouter(dependencies: {
     response.status(201).send({ data: resource })
   })
 
+  router.post('/:assessmentId/resources/:resourceId/process', async (request, response) => {
+    const auth = getAuthContext(request)
+    const assessmentId = idSchema.parse(request.params.assessmentId)
+    const resourceId = idSchema.parse(request.params.resourceId)
+    response.send({ data: await dependencies.resources.processResource({ organizationId: auth.organizationId, assessmentId, resourceId }) })
+  })
+
   router.post('/:assessmentId/publish', async (request, response) => {
     const auth = getAuthContext(request)
     const assessmentId = idSchema.parse(request.params.assessmentId)

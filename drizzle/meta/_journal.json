@@ -29,6 +29,20 @@
       "when": 1789985297279,
       "tag": "0003_keen_cargill",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1789991796614,
+      "tag": "0004_aromatic_riptide",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1789992118550,
+      "tag": "0005_silent_ezekiel",
+      "breakpoints": true
     }
   ]
 }

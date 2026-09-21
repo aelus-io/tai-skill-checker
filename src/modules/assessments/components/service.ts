@@ -5,6 +5,7 @@ import {
   assessments,
   competencies,
   resources,
+  resourceChunks,
   rubrics,
   scenarioCompetencies,
   scenarios,
@@ -203,6 +204,7 @@ export function createAssessmentService(db: Database) {
         tx.select().from(resources).where(and(eq(resources.assessmentId, assessment.id), eq(resources.organizationId, input.organizationId), isNull(resources.assessmentVersionId))),
       ])
       validateDraftForPublication({ scenarios: draftScenarios, competencies: draftCompetencies, rubrics: draftRubrics, mappings: draftMappings })
+      if (draftResources.some((resource) => resource.status !== 'READY')) throw new ConflictError('RESOURCES_NOT_READY', 'Process every uploaded resource before publishing')
 
       const versionNumber = assessment.latestVersionNumber + 1
       const [version] = await tx.insert(assessmentVersions).values({
@@ -230,7 +232,8 @@ export function createAssessmentService(db: Database) {
         if (!scenarioId || !competencyId) throw new Error('Could not map published scenario competency')
         return { organizationId: input.organizationId, assessmentId: assessment.id, assessmentVersionId: version.id, scenarioId, competencyId }
       }))
-      if (draftResources.length) await tx.insert(resources).values(draftResources.map((item) => ({
+      if (draftResources.length) {
+        const publishedResources = await tx.insert(resources).values(draftResources.map((item) => ({
         organizationId: input.organizationId,
         assessmentId: assessment.id,
         assessmentVersionId: version.id,
@@ -240,7 +243,15 @@ export function createAssessmentService(db: Database) {
         storageKey: item.storageKey,
         status: item.status,
         uploadedBy: item.uploadedBy,
-      })))
+        }))).returning()
+        const draftChunks = await tx.select().from(resourceChunks).where(inArray(resourceChunks.resourceId, draftResources.map((item) => item.id)))
+        const publishedResourceIds = new Map(draftResources.map((item, index) => [item.id, publishedResources[index]?.id]))
+        if (draftChunks.length) await tx.insert(resourceChunks).values(draftChunks.map((chunk) => {
+          const resourceId = publishedResourceIds.get(chunk.resourceId)
+          if (!resourceId) throw new Error('Could not map published resource chunk')
+          return { organizationId: input.organizationId, assessmentId: assessment.id, assessmentVersionId: version.id, resourceId, position: chunk.position, content: chunk.content, embedding: chunk.embedding }
+        }))
+      }
       await tx.update(assessments).set({ status: 'PUBLISHED', latestVersionNumber: versionNumber, currentPublishedVersionId: version.id, updatedAt: new Date() }).where(eq(assessments.id, assessment.id))
       return version
     })
