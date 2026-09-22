@@ -1,4 +1,5 @@
 import { and, eq } from 'drizzle-orm'
+import { EgressStatus, ParticipantInfo_Kind } from '@livekit/protocol'
 import { AccessToken, AgentDispatchClient, EgressClient, EncodedFileOutput, EncodedFileType, RoomServiceClient, S3Upload, WebhookReceiver, type WebhookEvent } from 'livekit-server-sdk'
 import type { AppConfig } from '../../../config/index.js'
 import type { Database } from '../../../db/index.js'
@@ -7,6 +8,41 @@ import { ConfigurationError, ConflictError, NotFoundError } from '../../../http/
 import type { StartedAttempt } from '../../attempts/index.js'
 
 type LiveKitConfig = Pick<AppConfig, 'livekitUrl' | 'livekitApiKey' | 'livekitApiSecret' | 'livekitAgentName' | 'livekitTokenTtlSeconds' | 'r2Endpoint' | 'r2AccessKeyId' | 'r2SecretAccessKey' | 'r2BucketName'>
+
+const provisioningTimeoutMs = 15_000
+const provisioningPollIntervalMs = 250
+
+async function pause(milliseconds: number) {
+  await new Promise((resolve) => setTimeout(resolve, milliseconds))
+}
+
+export async function waitForRealtimeInfrastructure(input: {
+  roomName: string
+  egressId: string
+  roomClient: Pick<RoomServiceClient, 'listParticipants'>
+  egressClient: Pick<EgressClient, 'listEgress'>
+  timeoutMs?: number
+  pollIntervalMs?: number
+}) {
+  const timeoutMs = input.timeoutMs ?? provisioningTimeoutMs
+  const pollIntervalMs = input.pollIntervalMs ?? provisioningPollIntervalMs
+  const deadline = Date.now() + timeoutMs
+
+  while (Date.now() <= deadline) {
+    const [participants, egresses] = await Promise.all([
+      input.roomClient.listParticipants(input.roomName),
+      input.egressClient.listEgress({ egressId: input.egressId }),
+    ])
+    const egress = egresses[0]
+    if (egress?.status === EgressStatus.EGRESS_FAILED || egress?.status === EgressStatus.EGRESS_ABORTED || egress?.status === EgressStatus.EGRESS_LIMIT_REACHED) {
+      throw new Error(`LiveKit recording failed to start${egress.error ? `: ${egress.error}` : ''}`)
+    }
+    if (participants.some((participant) => participant.kind === ParticipantInfo_Kind.AGENT) && egress?.status === EgressStatus.EGRESS_ACTIVE) return
+    await pause(pollIntervalMs)
+  }
+
+  throw new Error('LiveKit agent or recording did not become ready before the session startup timeout')
+}
 
 export async function createParticipantToken(input: { apiKey: string; apiSecret: string; ttlSeconds: number; roomName: string; identity: string; metadata: Record<string, string>; observer: boolean }) {
   const access = new AccessToken(input.apiKey, input.apiSecret, { identity: input.identity, ttl: input.ttlSeconds, metadata: JSON.stringify(input.metadata) })
@@ -37,6 +73,7 @@ export function createLiveKitService(db: Database, config: LiveKitConfig) {
       const storageKey = `recordings/${attempt.organizationId}/${attempt.assessmentId}/${attempt.id}/recording.ogg`
       const output = new EncodedFileOutput({ fileType: EncodedFileType.OGG, filepath: storageKey, output: { case: 's3', value: new S3Upload({ accessKey: config.r2AccessKeyId, secret: config.r2SecretAccessKey, endpoint: config.r2Endpoint, bucket: config.r2BucketName, region: 'auto', forcePathStyle: true }) } })
       const egress = await egressClient.startRoomCompositeEgress(attempt.roomName, output, { audioOnly: true })
+      await waitForRealtimeInfrastructure({ roomName: attempt.roomName, egressId: egress.egressId, roomClient, egressClient })
       await db.insert(recordings).values({ organizationId: attempt.organizationId, attemptId: attempt.id, storageKey, mimeType: 'audio/ogg', egressId: egress.egressId, status: 'ACTIVE' })
       return { token: await token(attempt.roomName, `employee-${attempt.employeeUserId}`, { role: 'employee', attemptId: attempt.id }, false), url: livekit.participantUrl }
     } catch (error) {
@@ -51,6 +88,13 @@ export function createLiveKitService(db: Database, config: LiveKitConfig) {
     if (!['IN_PROGRESS', 'PROCESSING'].includes(attempt.status)) throw new ConflictError('ATTEMPT_NOT_ACTIVE', 'Attempt is not active')
     const livekit = requireConfig()
     return { url: livekit.participantUrl, token: await token(attempt.roomName, `observer-${input.adminUserId}-${Date.now()}`, { role: 'observer', attemptId: attempt.id }, true) }
+  }
+
+  async function closeRooms(roomNames: string[]) {
+    if (!roomNames.length) return
+    const livekit = requireConfig()
+    const roomClient = new RoomServiceClient(livekit.url, livekit.key, livekit.secret)
+    await Promise.allSettled([...new Set(roomNames)].map((roomName) => roomClient.deleteRoom(roomName)))
   }
 
   function receiver() { const c = requireConfig(); return new WebhookReceiver(c.key, c.secret) }
@@ -73,6 +117,6 @@ export function createLiveKitService(db: Database, config: LiveKitConfig) {
     }
   }
 
-  return { provision, observerToken, receiveWebhook, applyRecordingWebhook }
+  return { provision, observerToken, closeRooms, receiveWebhook, applyRecordingWebhook }
 }
 export type LiveKitService = ReturnType<typeof createLiveKitService>

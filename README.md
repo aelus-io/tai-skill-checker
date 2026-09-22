@@ -78,6 +78,8 @@ All admin endpoints require a Better Auth session cookie and an `ADMIN` organiza
 | `POST` | `/api/assessments/:id/publish` | Atomically create an immutable version |
 | `GET` | `/api/assessments/:id/versions/:versionId` | Read one exact published version |
 | `POST` | `/api/assessments/:id/invitations` | Create assignments and send email invitations |
+| `GET` | `/api/assessments/:id/invitations` | List invited employees and their current attempt allowance |
+| `POST` | `/api/assessments/:id/invitations/:invitationId/reinvite` | Rotate the invitation and grant a fresh attempt allowance |
 | `GET` | `/api/invitations/:token` | Read employee safe invitation preview |
 | `POST` | `/api/invitations/:token/accept` | Bind the assignment to the matching signed in employee |
 | `GET` | `/api/assignments/:id/preparation` | Read preparation details without consuming an attempt |

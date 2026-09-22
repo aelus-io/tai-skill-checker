@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, asc, eq, inArray } from 'drizzle-orm'
 import type { Logger } from 'pino'
 import type { AppConfig } from '../../../config/index.js'
 import type { Database } from '../../../db/index.js'
@@ -7,6 +7,8 @@ import {
   assessmentVersions,
   assessments,
   assignments,
+  attempts,
+  attemptEvents,
   competencies,
   invitations,
   organizationMemberships,
@@ -20,9 +22,37 @@ const hashToken = (token: string) => createHash('sha256').update(token).digest('
 export function createInvitationService(
   db: Database,
   notifications: NotificationService,
-  config: Pick<AppConfig, 'frontendUrl' | 'invitationTtlHours'>,
+  config: Pick<AppConfig, 'frontendUrl' | 'invitationTtlHours' | 'maxAssessmentAttempts'>,
   logger: Logger,
+  closeRooms: (roomNames: string[]) => Promise<void>,
 ) {
+  async function deliverInvitation(input: { invitationId: string; organizationId: string; email: string; assessmentName: string; token: string; expiresAt: Date; idempotencyKey: string }) {
+    try {
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        try {
+          await notifications.sendInvitation({
+            idempotencyKey: input.idempotencyKey,
+            to: input.email,
+            assessmentName: input.assessmentName,
+            invitationUrl: `${config.frontendUrl}/invitations/${encodeURIComponent(input.token)}`,
+            expiresAt: input.expiresAt,
+          })
+          break
+        } catch (error) {
+          if (attempt === 3) throw error
+          await new Promise((resolve) => setTimeout(resolve, attempt * 250))
+        }
+      }
+      await db.update(invitations).set({ emailSentAt: new Date(), emailError: null }).where(eq(invitations.id, input.invitationId))
+      return true
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown delivery error'
+      await db.update(invitations).set({ emailError: message.slice(0, 1_000) }).where(eq(invitations.id, input.invitationId))
+      logger.error({ invitationId: input.invitationId, organizationId: input.organizationId, err: error }, 'Invitation delivery failed')
+      return false
+    }
+  }
+
   async function invite(input: { organizationId: string; assessmentId: string; userId: string; emails: string[] }) {
     if (!notifications.isConfigured) throw new ConfigurationError('Resend invitation delivery')
     const emails = [...new Set(input.emails.map(normalizeEmail))]
@@ -65,33 +95,109 @@ export function createInvitationService(
       return rows
     })
 
-    const deliveries = await Promise.all(created.map(async (item) => {
-      try {
-        for (let attempt = 1; attempt <= 3; attempt += 1) {
-          try {
-            await notifications.sendInvitation({
-              idempotencyKey: `invitation-${item.invitation.id}`,
-              to: item.invitation.email,
-              assessmentName: assessment.name,
-              invitationUrl: `${config.frontendUrl}/invitations/${encodeURIComponent(item.token)}`,
-              expiresAt,
-            })
-            break
-          } catch (error) {
-            if (attempt === 3) throw error
-            await new Promise((resolve) => setTimeout(resolve, attempt * 250))
-          }
-        }
-        await db.update(invitations).set({ emailSentAt: new Date(), emailError: null }).where(eq(invitations.id, item.invitation.id))
-        return { invitationId: item.invitation.id, email: item.invitation.email, sent: true as const }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Unknown delivery error'
-        await db.update(invitations).set({ emailError: message.slice(0, 1_000) }).where(eq(invitations.id, item.invitation.id))
-        logger.error({ invitationId: item.invitation.id, organizationId: input.organizationId, err: error }, 'Invitation delivery failed')
-        return { invitationId: item.invitation.id, email: item.invitation.email, sent: false as const }
-      }
-    }))
+    const deliveries = await Promise.all(created.map(async (item) => ({
+      invitationId: item.invitation.id,
+      email: item.invitation.email,
+      sent: await deliverInvitation({
+        invitationId: item.invitation.id,
+        organizationId: input.organizationId,
+        email: item.invitation.email,
+        assessmentName: assessment.name,
+        token: item.token,
+        expiresAt,
+        idempotencyKey: `invitation-${item.invitation.id}`,
+      }),
+    })))
     return { expiresAt, invitations: deliveries }
+  }
+
+  async function list(input: { organizationId: string; assessmentId: string }) {
+    const rows = await db.select({
+      invitationId: invitations.id,
+      assignmentId: assignments.id,
+      email: invitations.email,
+      invitationStatus: invitations.status,
+      assignmentStatus: assignments.status,
+      expiresAt: invitations.expiresAt,
+      attemptsResetAt: assignments.attemptsResetAt,
+    }).from(invitations).innerJoin(assignments, eq(assignments.invitationId, invitations.id)).where(and(
+      eq(invitations.organizationId, input.organizationId),
+      eq(invitations.assessmentId, input.assessmentId),
+    )).orderBy(asc(invitations.email))
+    const history = rows.length ? await db.select({ assignmentId: attempts.assignmentId, createdAt: attempts.createdAt, status: attempts.status }).from(attempts).where(and(
+      eq(attempts.organizationId, input.organizationId),
+      inArray(attempts.assignmentId, rows.map((row) => row.assignmentId)),
+    )) : []
+    return rows.map(({ attemptsResetAt, ...row }) => {
+      const currentAttempts = history.filter((attempt) => attempt.assignmentId === row.assignmentId && (!attemptsResetAt || attempt.createdAt > attemptsResetAt))
+      return {
+        ...row,
+        attemptsUsed: currentAttempts.length,
+        attemptsRemaining: Math.max(0, config.maxAssessmentAttempts - currentAttempts.length),
+        hasActiveAttempt: history.some((attempt) => attempt.assignmentId === row.assignmentId && (attempt.status === 'IN_PROGRESS' || attempt.status === 'PROCESSING')),
+      }
+    })
+  }
+
+  async function reinvite(input: { organizationId: string; assessmentId: string; invitationId: string; userId: string }) {
+    if (!notifications.isConfigured) throw new ConfigurationError('Resend invitation delivery')
+    const token = randomBytes(32).toString('base64url')
+    const expiresAt = new Date(Date.now() + config.invitationTtlHours * 60 * 60 * 1_000)
+    const resetAt = new Date()
+    const result = await db.transaction(async (tx) => {
+      const [invitation] = await tx.select().from(invitations).where(and(
+        eq(invitations.id, input.invitationId),
+        eq(invitations.organizationId, input.organizationId),
+        eq(invitations.assessmentId, input.assessmentId),
+      )).for('update').limit(1)
+      if (!invitation) throw new NotFoundError('Invitation')
+      const [assignment] = await tx.select().from(assignments).where(and(
+        eq(assignments.invitationId, invitation.id),
+        eq(assignments.organizationId, input.organizationId),
+      )).for('update').limit(1)
+      if (!assignment) throw new NotFoundError('Assignment')
+      const active = await tx.select({ id: attempts.id, roomName: attempts.roomName }).from(attempts).where(and(
+        eq(attempts.assignmentId, assignment.id),
+        inArray(attempts.status, ['IN_PROGRESS', 'PROCESSING']),
+      ))
+      if (active.length) {
+        await tx.update(attempts).set({ status: 'ABANDONED', updatedAt: resetAt }).where(inArray(attempts.id, active.map((attempt) => attempt.id)))
+        await tx.insert(attemptEvents).values(active.map((attempt) => ({
+          organizationId: input.organizationId,
+          attemptId: attempt.id,
+          type: 'ADMIN_REINVITE_RESET',
+          payload: { resetBy: input.userId },
+          idempotencyKey: `admin-reinvite-reset-${resetAt.toISOString()}`,
+        })))
+      }
+      await tx.update(invitations).set({
+        status: 'PENDING',
+        tokenHash: hashToken(token),
+        expiresAt,
+        acceptedAt: null,
+        emailSentAt: null,
+        emailError: null,
+        createdBy: input.userId,
+      }).where(eq(invitations.id, invitation.id))
+      await tx.update(assignments).set({ status: 'PENDING', attemptsResetAt: resetAt, updatedAt: resetAt }).where(eq(assignments.id, assignment.id))
+      const [assessment] = await tx.select({ name: assessments.name }).from(assessments).where(and(
+        eq(assessments.id, invitation.assessmentId),
+        eq(assessments.organizationId, input.organizationId),
+      )).limit(1)
+      if (!assessment) throw new NotFoundError('Assessment')
+      return { invitation, assessment, roomNames: active.flatMap((attempt) => attempt.roomName ? [attempt.roomName] : []) }
+    })
+    await closeRooms(result.roomNames)
+    const sent = await deliverInvitation({
+      invitationId: result.invitation.id,
+      organizationId: input.organizationId,
+      email: result.invitation.email,
+      assessmentName: result.assessment.name,
+      token,
+      expiresAt,
+      idempotencyKey: `reinvitation-${result.invitation.id}-${hashToken(token).slice(0, 12)}`,
+    })
+    return { invitationId: result.invitation.id, email: result.invitation.email, expiresAt, sent, attemptsRemaining: config.maxAssessmentAttempts }
   }
 
   async function preview(rawToken: string) {
@@ -138,7 +244,7 @@ export function createInvitationService(
     return result.assignment
   }
 
-  return { invite, preview, accept }
+  return { invite, list, reinvite, preview, accept }
 }
 
 export type InvitationService = ReturnType<typeof createInvitationService>

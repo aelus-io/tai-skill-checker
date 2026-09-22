@@ -169,5 +169,18 @@ export function createAssessmentRouter(dependencies: {
     response.status(201).send({ data: await dependencies.invitations.invite({ ...auth, assessmentId, emails }) })
   })
 
+  router.get('/:assessmentId/invitations', async (request, response) => {
+    const auth = getAuthContext(request)
+    const assessmentId = idSchema.parse(request.params.assessmentId)
+    response.send({ data: await dependencies.invitations.list({ organizationId: auth.organizationId, assessmentId }) })
+  })
+
+  router.post('/:assessmentId/invitations/:invitationId/reinvite', async (request, response) => {
+    const auth = getAuthContext(request)
+    const assessmentId = idSchema.parse(request.params.assessmentId)
+    const invitationId = idSchema.parse(request.params.invitationId)
+    response.send({ data: await dependencies.invitations.reinvite({ ...auth, assessmentId, invitationId }) })
+  })
+
   return router
 }

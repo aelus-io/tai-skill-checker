@@ -1,0 +1,1 @@
+ALTER TABLE "assignments" ADD COLUMN "attempts_reset_at" timestamp with time zone;

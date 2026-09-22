@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canTransitionAttempt, nextAttemptNumber } from '../index.js'
+import { assertAttemptAvailable, canTransitionAttempt, nextAttemptNumber, remainingAttempts } from '../index.js'
 
 describe('attempt state machine', () => {
   it('permits the successful flow and interruption from an active session', () => {
@@ -16,9 +16,12 @@ describe('attempt state machine', () => {
     expect(canTransitionAttempt('PROCESSING', 'IN_PROGRESS')).toBe(false)
   })
 
-  it('counts every started attempt and rejects the configured limit', () => {
-    expect(nextAttemptNumber(null, 3)).toBe(1)
-    expect(nextAttemptNumber(2, 3)).toBe(3)
-    expect(() => nextAttemptNumber(3, 3)).toThrowError(expect.objectContaining({ code: 'ATTEMPT_LIMIT_REACHED' }))
+  it('enforces each attempt window while keeping audit numbers monotonic', () => {
+    expect(nextAttemptNumber(null)).toBe(1)
+    expect(nextAttemptNumber(3)).toBe(4)
+    expect(remainingAttempts(0, 3)).toBe(3)
+    expect(remainingAttempts(2, 3)).toBe(1)
+    expect(() => assertAttemptAvailable(3, 3)).toThrowError(expect.objectContaining({ code: 'ATTEMPT_LIMIT_REACHED' }))
+    expect(() => assertAttemptAvailable(0, 3)).not.toThrow()
   })
 })

@@ -1,29 +1,36 @@
-import { and, asc, count, eq, inArray, isNull, max } from 'drizzle-orm'
+import { and, asc, count, eq, gt, inArray, isNull, max } from 'drizzle-orm'
 import type { Database } from '../../../db/index.js'
 import { assignments, attempts, attemptEvents, attemptScenarios, attemptTurns, assessmentVersions, competencies, scenarios, users } from '../../../db/schema.js'
 import { ConflictError, ForbiddenError, NotFoundError } from '../../../http/errors.js'
-import { canTransitionAttempt, nextAttemptNumber } from './state-machine.js'
+import { assertAttemptAvailable, canTransitionAttempt, nextAttemptNumber, remainingAttempts } from './state-machine.js'
 import type { AttemptSpeaker, AttemptStatus, StartedAttempt } from '../types/index.js'
+
+const consumedAttemptStatuses: AttemptStatus[] = ['IN_PROGRESS', 'PROCESSING', 'COMPLETED', 'ABANDONED']
 
 export function createAttemptService(db: Database, maxAttempts: number) {
   async function prepare(input: { organizationId: string; assignmentId: string; userId: string }) {
     const [row] = await db.select({
       assignmentId: assignments.id, status: assignments.status, assessmentId: assignments.assessmentId,
-      assessmentVersionId: assignments.assessmentVersionId, name: assessmentVersions.name,
+      assessmentVersionId: assignments.assessmentVersionId, attemptsResetAt: assignments.attemptsResetAt, name: assessmentVersions.name,
       description: assessmentVersions.description, preparationInstructions: assessmentVersions.preparationInstructions,
     }).from(assignments).innerJoin(assessmentVersions, eq(assignments.assessmentVersionId, assessmentVersions.id)).where(and(
       eq(assignments.id, input.assignmentId), eq(assignments.organizationId, input.organizationId), eq(assignments.employeeUserId, input.userId),
     )).limit(1)
     if (!row) throw new NotFoundError('Assignment')
     const [usage, visibleCompetencies] = await Promise.all([
-      db.select({ used: count() }).from(attempts).where(eq(attempts.assignmentId, input.assignmentId)).then((rows) => rows[0]),
+      db.select({ used: count() }).from(attempts).where(and(
+        eq(attempts.assignmentId, input.assignmentId),
+        inArray(attempts.status, consumedAttemptStatuses),
+        row.attemptsResetAt ? gt(attempts.createdAt, row.attemptsResetAt) : undefined,
+      )).then((rows) => rows[0]),
       db.select({ name: competencies.name, description: competencies.description }).from(competencies).where(and(
         eq(competencies.organizationId, input.organizationId),
         eq(competencies.assessmentVersionId, row.assessmentVersionId),
       )).orderBy(asc(competencies.position)),
     ])
     const used = usage?.used ?? 0
-    return { ...row, competencies: visibleCompetencies, attemptsUsed: used, attemptsRemaining: Math.max(0, maxAttempts - used) }
+    const { attemptsResetAt: _attemptsResetAt, ...preparation } = row
+    return { ...preparation, competencies: visibleCompetencies, attemptsUsed: used, attemptsRemaining: remainingAttempts(used, maxAttempts) }
   }
 
   async function start(input: { organizationId: string; assignmentId: string; userId: string }): Promise<StartedAttempt> {
@@ -35,9 +42,15 @@ export function createAttemptService(db: Database, maxAttempts: number) {
       if (assignment.employeeUserId !== input.userId) throw new ForbiddenError()
       if (assignment.status === 'COMPLETED') throw new ConflictError('ASSIGNMENT_LOCKED', 'This assessment has already been completed')
       if (assignment.status !== 'READY') throw new ConflictError('ASSIGNMENT_NOT_READY', 'This assignment cannot be started')
+      const [usage] = await tx.select({ used: count() }).from(attempts).where(and(
+        eq(attempts.assignmentId, assignment.id),
+        inArray(attempts.status, consumedAttemptStatuses),
+        assignment.attemptsResetAt ? gt(attempts.createdAt, assignment.attemptsResetAt) : undefined,
+      ))
+      assertAttemptAvailable(usage?.used ?? 0, maxAttempts)
       const [numberRow] = await tx.select({ lastNumber: max(attempts.attemptNumber) }).from(attempts).where(eq(attempts.assignmentId, assignment.id))
       const lastNumber = numberRow?.lastNumber ?? 0
-      const attemptNumber = nextAttemptNumber(lastNumber, maxAttempts)
+      const attemptNumber = nextAttemptNumber(lastNumber)
       const orderedScenarios = await tx.select({ id: scenarios.id, position: scenarios.position }).from(scenarios).where(and(
         eq(scenarios.organizationId, input.organizationId), eq(scenarios.assessmentVersionId, assignment.assessmentVersionId),
       )).orderBy(asc(scenarios.position))

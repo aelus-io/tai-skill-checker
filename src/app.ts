@@ -76,7 +76,7 @@ export function createApp(dependencies: { config: AppConfig; db: Database; auth:
   const resources = createResourceService(db, config)
   const generator = createAssessmentGenerator(config)
   const notifications = createNotificationService(config)
-  const invitations = createInvitationService(db, notifications, config, logger)
+  const invitations = createInvitationService(db, notifications, config, logger, livekit.closeRooms)
   const organizations = createOrganizationService(db)
   const requireAuth = createRequireAuth(auth, db)
 

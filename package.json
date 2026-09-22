@@ -24,6 +24,7 @@
     "@google/genai": "^2.23.0",
     "@livekit/agents": "^1.9.0",
     "@livekit/agents-plugin-google": "^1.9.0",
+    "@livekit/protocol": "^1.52.0",
     "@neondatabase/serverless": "^1.1.0",
     "better-auth": "^1.7.5",
     "dotenv": "^17.2.2",

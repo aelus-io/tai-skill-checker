@@ -248,6 +248,7 @@ export const assignments = pgTable('assignments', {
   employeeEmail: text('employee_email').notNull(),
   employeeUserId: text('employee_user_id').references(() => users.id),
   status: assignmentStatusEnum('status').notNull().default('PENDING'),
+  attemptsResetAt: timestamp('attempts_reset_at', { withTimezone: true }),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 }, (table) => [

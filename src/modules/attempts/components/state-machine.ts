@@ -12,8 +12,14 @@ export function canTransitionAttempt(from: AttemptStatus, to: AttemptStatus) {
   return transitions[from].includes(to)
 }
 
-export function nextAttemptNumber(lastNumber: number | null, maximum: number) {
-  const next = (lastNumber ?? 0) + 1
-  if (next > maximum) throw new ConflictError('ATTEMPT_LIMIT_REACHED', 'Maximum number of attempts reached')
-  return next
+export function assertAttemptAvailable(used: number, maximum: number) {
+  if (used >= maximum) throw new ConflictError('ATTEMPT_LIMIT_REACHED', 'Maximum number of attempts reached')
+}
+
+export function nextAttemptNumber(lastNumber: number | null) {
+  return (lastNumber ?? 0) + 1
+}
+
+export function remainingAttempts(used: number, maximum: number) {
+  return Math.max(0, maximum - used)
 }
