@@ -1,6 +1,6 @@
 import { and, asc, count, eq, inArray, isNull, max } from 'drizzle-orm'
 import type { Database } from '../../../db/index.js'
-import { assignments, attempts, attemptEvents, attemptScenarios, attemptTurns, assessmentVersions, scenarios, users } from '../../../db/schema.js'
+import { assignments, attempts, attemptEvents, attemptScenarios, attemptTurns, assessmentVersions, competencies, scenarios, users } from '../../../db/schema.js'
 import { ConflictError, ForbiddenError, NotFoundError } from '../../../http/errors.js'
 import { canTransitionAttempt, nextAttemptNumber } from './state-machine.js'
 import type { AttemptSpeaker, AttemptStatus, StartedAttempt } from '../types/index.js'
@@ -15,9 +15,15 @@ export function createAttemptService(db: Database, maxAttempts: number) {
       eq(assignments.id, input.assignmentId), eq(assignments.organizationId, input.organizationId), eq(assignments.employeeUserId, input.userId),
     )).limit(1)
     if (!row) throw new NotFoundError('Assignment')
-    const [usage] = await db.select({ used: count() }).from(attempts).where(eq(attempts.assignmentId, input.assignmentId))
+    const [usage, visibleCompetencies] = await Promise.all([
+      db.select({ used: count() }).from(attempts).where(eq(attempts.assignmentId, input.assignmentId)).then((rows) => rows[0]),
+      db.select({ name: competencies.name, description: competencies.description }).from(competencies).where(and(
+        eq(competencies.organizationId, input.organizationId),
+        eq(competencies.assessmentVersionId, row.assessmentVersionId),
+      )).orderBy(asc(competencies.position)),
+    ])
     const used = usage?.used ?? 0
-    return { ...row, attemptsUsed: used, attemptsRemaining: Math.max(0, maxAttempts - used) }
+    return { ...row, competencies: visibleCompetencies, attemptsUsed: used, attemptsRemaining: Math.max(0, maxAttempts - used) }
   }
 
   async function start(input: { organizationId: string; assignmentId: string; userId: string }): Promise<StartedAttempt> {

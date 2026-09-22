@@ -24,4 +24,8 @@ describe('environment configuration', () => {
     expect(config.livekitUrl).toBeUndefined()
     expect(config.r2Endpoint).toBeUndefined()
   })
+
+  it('rejects a Live-only model for assessment generation', () => {
+    expect(() => loadConfig({ ...valid, GEMINI_MODEL: 'gemini-3.1-flash-live-preview' })).toThrow(/must support generateContent/)
+  })
 })

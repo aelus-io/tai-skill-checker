@@ -20,7 +20,7 @@ import { createResourceService } from './modules/resources/index.js'
 import { createErrorHandler, notFoundHandler } from './http/error-handler.js'
 import { sanitizeRequestUrl } from './http/logging.js'
 import { ForbiddenError } from './http/errors.js'
-import { createRequireAuth, requireRole } from './http/middleware/auth.js'
+import { createRequireAuth, getAuthContext, requireRole } from './http/middleware/auth.js'
 import { createAssessmentRouter } from './http/routes/assessments.js'
 import { createInvitationRouter } from './http/routes/invitations.js'
 import { createAttemptRouter } from './http/routes/attempts.js'
@@ -94,6 +94,11 @@ export function createApp(dependencies: { config: AppConfig; db: Database; auth:
     }).parse(request.body)
     const membership = await organizations.bootstrapAdmin({ userId: session.user.id, ...body })
     response.status(201).send({ data: membership })
+  })
+
+  app.get('/api/me', requireAuth, (request, response) => {
+    const authContext = getAuthContext(request)
+    response.send({ data: { userId: authContext.userId, email: authContext.email, role: authContext.role } })
   })
 
   app.use('/api/invitations', createInvitationRouter(invitations, auth))

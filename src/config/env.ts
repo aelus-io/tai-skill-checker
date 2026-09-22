@@ -12,7 +12,10 @@ const EnvSchema = z.object({
   BETTER_AUTH_URL: z.url(),
   FRONTEND_URL: z.url(),
   GOOGLE_GENERATIVE_AI_API_KEY: optional(z.string().min(1)),
-  GEMINI_MODEL: z.string().min(1).default('gemini-2.5-flash'),
+  GEMINI_MODEL: z.string().min(1).refine(
+    (model) => !model.toLowerCase().includes('live'),
+    'GEMINI_MODEL must support generateContent; configure realtime models through GEMINI_LIVE_MODEL',
+  ).default('gemini-3-flash-preview'),
   GEMINI_LIVE_MODEL: z.string().min(1).default('gemini-2.5-flash-native-audio-preview-12-2025'),
   GEMINI_EMBEDDING_MODEL: z.string().min(1).default('gemini-embedding-001'),
   RESEND_API_KEY: optional(z.string().min(1)),
