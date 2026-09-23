@@ -202,6 +202,30 @@ export function createAttemptService(db: Database, maxAttempts: number) {
     })
   }
 
+  async function abandonByEmployee(input: { organizationId: string; attemptId: string; userId: string }) {
+    return db.transaction(async (tx) => {
+      const [attempt] = await tx.select().from(attempts).where(and(
+        eq(attempts.id, input.attemptId),
+        eq(attempts.organizationId, input.organizationId),
+      )).for('update').limit(1)
+      if (!attempt) throw new NotFoundError('Attempt')
+      if (attempt.employeeUserId !== input.userId) throw new ForbiddenError()
+      if (attempt.status === 'ABANDONED') return { status: attempt.status, roomName: attempt.roomName }
+      if (!canTransitionAttempt(attempt.status, 'ABANDONED')) throw new ConflictError('ATTEMPT_NOT_ACTIVE', 'Attempt is not active')
+
+      const now = new Date()
+      await tx.update(attempts).set({ status: 'ABANDONED', updatedAt: now }).where(eq(attempts.id, attempt.id))
+      await tx.insert(attemptEvents).values({
+        organizationId: input.organizationId,
+        attemptId: attempt.id,
+        type: 'SESSION_ENDED_BY_EMPLOYEE',
+        payload: {},
+        idempotencyKey: 'employee-ended',
+      }).onConflictDoNothing()
+      return { status: 'ABANDONED' as const, roomName: attempt.roomName }
+    })
+  }
+
   async function getContext(organizationId: string, attemptId: string) {
     const [attempt] = await db.select().from(attempts).where(and(eq(attempts.id, attemptId), eq(attempts.organizationId, organizationId))).limit(1)
     if (!attempt) throw new NotFoundError('Attempt')
@@ -230,7 +254,7 @@ export function createAttemptService(db: Database, maxAttempts: number) {
     await transition({ organizationId: attempt.organizationId, attemptId: attempt.id, to: 'ABANDONED', eventType: 'SESSION_DISCONNECTED', idempotencyKey: eventId })
   }
 
-  return { listForEmployee, prepare, start, failStart, transition, appendTurn, recordEvent, completeScenario, completeAssessment, getContext, inspectActive, inspect, abandonByRoom }
+  return { listForEmployee, prepare, start, failStart, transition, appendTurn, recordEvent, completeScenario, completeAssessment, abandonByEmployee, getContext, inspectActive, inspect, abandonByRoom }
 }
 
 function inArrayValue<T>(value: T, choices: readonly T[]): boolean { return choices.includes(value) }

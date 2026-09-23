@@ -70,6 +70,7 @@ All admin endpoints require a Better Auth session cookie and an `ADMIN` organiza
 | `GET` | `/api/assignments` | List assignments belonging to the authenticated employee |
 | `GET` | `/api/assignments/:id/preparation` | Read preparation details without consuming an attempt |
 | `POST` | `/api/assignments/:id/attempts` | Atomically consume an attempt and start its LiveKit session |
+| `POST` | `/api/attempts/:id/abandon` | Persist an employee-ended attempt and close its LiveKit room |
 | `GET` | `/api/admin/attempts/active` | List live attempts for the organization |
 | `GET` | `/api/admin/attempts/:id` | Read scenario progress, transcript, and lifecycle events |
 | `POST` | `/api/admin/attempts/:id/observer-token` | Create a short lived, listen only admin token |

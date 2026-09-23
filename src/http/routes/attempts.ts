@@ -26,6 +26,12 @@ export function createAttemptRouter(dependencies: { attempts: AttemptService; li
       throw error
     }
   })
+  router.post('/attempts/:attemptId/abandon', requireRole('EMPLOYEE'), async (request, response) => {
+    const auth = getAuthContext(request); const { attemptId } = z.object({ attemptId: z.uuid() }).parse(request.params)
+    const result = await dependencies.attempts.abandonByEmployee({ organizationId: auth.organizationId, userId: auth.userId, attemptId })
+    if (result.roomName) await dependencies.livekit.closeRooms([result.roomName])
+    response.send({ data: { status: result.status } })
+  })
   router.get('/admin/attempts/active', requireRole('ADMIN'), async (request, response) => { const auth = getAuthContext(request); response.send({ data: await dependencies.attempts.inspectActive(auth.organizationId) }) })
   router.get('/admin/attempts/:attemptId', requireRole('ADMIN'), async (request, response) => { const auth = getAuthContext(request); const { attemptId } = z.object({ attemptId: z.uuid() }).parse(request.params); response.send({ data: await dependencies.attempts.inspect(auth.organizationId, attemptId) }) })
   router.post('/admin/attempts/:attemptId/observer-token', requireRole('ADMIN'), async (request, response) => { const auth = getAuthContext(request); const { attemptId } = z.object({ attemptId: z.uuid() }).parse(request.params); response.send({ data: await dependencies.livekit.observerToken({ organizationId: auth.organizationId, attemptId, adminUserId: auth.userId }) }) })
