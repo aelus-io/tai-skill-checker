@@ -14,6 +14,11 @@ export function createInvitationRouter(invitations: InvitationService, auth: Aut
     response.send({ data: await invitations.preview(tokenSchema.parse(request.params.token)) })
   })
 
+  router.post('/:token/sign-in', async (request, response) => {
+    await invitations.requestSignIn(tokenSchema.parse(request.params.token))
+    response.status(202).send({ data: { sent: true } })
+  })
+
   router.post('/:token/accept', async (request, response) => {
     const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) })
     if (!session) throw new ForbiddenError('Sign in before accepting this invitation')

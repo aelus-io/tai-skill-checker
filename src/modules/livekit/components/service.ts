@@ -37,7 +37,10 @@ export async function waitForRealtimeInfrastructure(input: {
     if (egress?.status === EgressStatus.EGRESS_FAILED || egress?.status === EgressStatus.EGRESS_ABORTED || egress?.status === EgressStatus.EGRESS_LIMIT_REACHED) {
       throw new Error(`LiveKit recording failed to start${egress.error ? `: ${egress.error}` : ''}`)
     }
-    if (participants.some((participant) => participant.kind === ParticipantInfo_Kind.AGENT) && egress?.status === EgressStatus.EGRESS_ACTIVE) return
+    if (
+      participants.some((participant) => participant.kind === ParticipantInfo_Kind.AGENT)
+      && (egress?.status === EgressStatus.EGRESS_STARTING || egress?.status === EgressStatus.EGRESS_ACTIVE)
+    ) return egress.status
     await pause(pollIntervalMs)
   }
 
@@ -73,8 +76,15 @@ export function createLiveKitService(db: Database, config: LiveKitConfig) {
       const storageKey = `recordings/${attempt.organizationId}/${attempt.assessmentId}/${attempt.id}/recording.ogg`
       const output = new EncodedFileOutput({ fileType: EncodedFileType.OGG, filepath: storageKey, output: { case: 's3', value: new S3Upload({ accessKey: config.r2AccessKeyId, secret: config.r2SecretAccessKey, endpoint: config.r2Endpoint, bucket: config.r2BucketName, region: 'auto', forcePathStyle: true }) } })
       const egress = await egressClient.startRoomCompositeEgress(attempt.roomName, output, { audioOnly: true })
-      await waitForRealtimeInfrastructure({ roomName: attempt.roomName, egressId: egress.egressId, roomClient, egressClient })
-      await db.insert(recordings).values({ organizationId: attempt.organizationId, attemptId: attempt.id, storageKey, mimeType: 'audio/ogg', egressId: egress.egressId, status: 'ACTIVE' })
+      const egressStatus = await waitForRealtimeInfrastructure({ roomName: attempt.roomName, egressId: egress.egressId, roomClient, egressClient })
+      await db.insert(recordings).values({
+        organizationId: attempt.organizationId,
+        attemptId: attempt.id,
+        storageKey,
+        mimeType: 'audio/ogg',
+        egressId: egress.egressId,
+        status: egressStatus === EgressStatus.EGRESS_ACTIVE ? 'ACTIVE' : 'STARTING',
+      })
       return { token: await token(attempt.roomName, `employee-${attempt.employeeUserId}`, { role: 'employee', attemptId: attempt.id }, false), url: livekit.participantUrl }
     } catch (error) {
       await roomClient.deleteRoom(attempt.roomName).catch(() => undefined)

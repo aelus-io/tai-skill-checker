@@ -1,4 +1,4 @@
-import { and, asc, count, eq, gt, inArray, isNull, max } from 'drizzle-orm'
+import { and, asc, count, desc, eq, gt, inArray, isNull, max } from 'drizzle-orm'
 import type { Database } from '../../../db/index.js'
 import { assignments, attempts, attemptEvents, attemptScenarios, attemptTurns, assessmentVersions, competencies, scenarios, users } from '../../../db/schema.js'
 import { ConflictError, ForbiddenError, NotFoundError } from '../../../http/errors.js'
@@ -7,7 +7,72 @@ import type { AttemptSpeaker, AttemptStatus, StartedAttempt } from '../types/ind
 
 const consumedAttemptStatuses: AttemptStatus[] = ['IN_PROGRESS', 'PROCESSING', 'COMPLETED', 'ABANDONED']
 
+type EmployeeAssignmentRow = {
+  assignmentId: string
+  status: 'PENDING' | 'READY' | 'COMPLETED' | 'EXPIRED'
+  assessmentId: string
+  name: string
+  description: string
+  attemptsResetAt: Date | null
+  updatedAt: Date
+}
+
+type EmployeeAttemptRow = {
+  assignmentId: string
+  status: AttemptStatus
+  createdAt: Date
+}
+
+export function summarizeEmployeeAssignment(row: EmployeeAssignmentRow, history: EmployeeAttemptRow[], maxAttempts: number) {
+  const currentAttempts = history.filter((attempt) => (
+    attempt.assignmentId === row.assignmentId
+    && consumedAttemptStatuses.includes(attempt.status)
+    && (!row.attemptsResetAt || attempt.createdAt > row.attemptsResetAt)
+  ))
+  return {
+    assignmentId: row.assignmentId,
+    status: row.status,
+    assessmentId: row.assessmentId,
+    name: row.name,
+    description: row.description,
+    updatedAt: row.updatedAt,
+    attemptsUsed: currentAttempts.length,
+    attemptsRemaining: remainingAttempts(currentAttempts.length, maxAttempts),
+    latestAttemptStatus: currentAttempts[0]?.status ?? null,
+    hasActiveAttempt: currentAttempts.some((attempt) => attempt.status === 'IN_PROGRESS' || attempt.status === 'PROCESSING'),
+  }
+}
+
 export function createAttemptService(db: Database, maxAttempts: number) {
+  async function listForEmployee(input: { organizationId: string; userId: string }) {
+    const rows = await db.select({
+      assignmentId: assignments.id,
+      status: assignments.status,
+      assessmentId: assignments.assessmentId,
+      name: assessmentVersions.name,
+      description: assessmentVersions.description,
+      attemptsResetAt: assignments.attemptsResetAt,
+      updatedAt: assignments.updatedAt,
+    }).from(assignments).innerJoin(
+      assessmentVersions,
+      eq(assignments.assessmentVersionId, assessmentVersions.id),
+    ).where(and(
+      eq(assignments.organizationId, input.organizationId),
+      eq(assignments.employeeUserId, input.userId),
+    )).orderBy(desc(assignments.updatedAt))
+
+    const history = rows.length ? await db.select({
+      assignmentId: attempts.assignmentId,
+      status: attempts.status,
+      createdAt: attempts.createdAt,
+    }).from(attempts).where(and(
+      eq(attempts.organizationId, input.organizationId),
+      inArray(attempts.assignmentId, rows.map((row) => row.assignmentId)),
+    )).orderBy(desc(attempts.createdAt)) : []
+
+    return rows.map((row) => summarizeEmployeeAssignment(row, history, maxAttempts))
+  }
+
   async function prepare(input: { organizationId: string; assignmentId: string; userId: string }) {
     const [row] = await db.select({
       assignmentId: assignments.id, status: assignments.status, assessmentId: assignments.assessmentId,
@@ -42,6 +107,11 @@ export function createAttemptService(db: Database, maxAttempts: number) {
       if (assignment.employeeUserId !== input.userId) throw new ForbiddenError()
       if (assignment.status === 'COMPLETED') throw new ConflictError('ASSIGNMENT_LOCKED', 'This assessment has already been completed')
       if (assignment.status !== 'READY') throw new ConflictError('ASSIGNMENT_NOT_READY', 'This assignment cannot be started')
+      const [activeAttempt] = await tx.select({ id: attempts.id }).from(attempts).where(and(
+        eq(attempts.assignmentId, assignment.id),
+        inArray(attempts.status, ['IN_PROGRESS', 'PROCESSING']),
+      )).limit(1)
+      if (activeAttempt) throw new ConflictError('ATTEMPT_ALREADY_ACTIVE', 'An assessment attempt is already active')
       const [usage] = await tx.select({ used: count() }).from(attempts).where(and(
         eq(attempts.assignmentId, assignment.id),
         inArray(attempts.status, consumedAttemptStatuses),
@@ -160,7 +230,7 @@ export function createAttemptService(db: Database, maxAttempts: number) {
     await transition({ organizationId: attempt.organizationId, attemptId: attempt.id, to: 'ABANDONED', eventType: 'SESSION_DISCONNECTED', idempotencyKey: eventId })
   }
 
-  return { prepare, start, failStart, transition, appendTurn, recordEvent, completeScenario, completeAssessment, getContext, inspectActive, inspect, abandonByRoom }
+  return { listForEmployee, prepare, start, failStart, transition, appendTurn, recordEvent, completeScenario, completeAssessment, getContext, inspectActive, inspect, abandonByRoom }
 }
 
 function inArrayValue<T>(value: T, choices: readonly T[]): boolean { return choices.includes(value) }

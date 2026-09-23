@@ -7,6 +7,10 @@ import { getAuthContext, requireRole } from '../middleware/auth.js'
 
 export function createAttemptRouter(dependencies: { attempts: AttemptService; livekit: LiveKitService; recordings: RecordingService }) {
   const router = Router()
+  router.get('/assignments', requireRole('EMPLOYEE'), async (request, response) => {
+    const auth = getAuthContext(request)
+    response.send({ data: await dependencies.attempts.listForEmployee({ organizationId: auth.organizationId, userId: auth.userId }) })
+  })
   router.get('/assignments/:assignmentId/preparation', requireRole('EMPLOYEE'), async (request, response) => {
     const auth = getAuthContext(request); const params = z.object({ assignmentId: z.uuid() }).parse(request.params)
     response.send({ data: await dependencies.attempts.prepare({ organizationId: auth.organizationId, userId: auth.userId, assignmentId: params.assignmentId }) })

@@ -1,11 +1,10 @@
 import { randomUUID } from 'node:crypto'
 import express from 'express'
 import { sql } from 'drizzle-orm'
-import { toNodeHandler, fromNodeHeaders } from 'better-auth/node'
+import { toNodeHandler } from 'better-auth/node'
 import { pinoHttp } from 'pino-http'
 import type { IncomingMessage } from 'node:http'
 import type { Logger } from 'pino'
-import { z } from 'zod'
 import type { AppConfig } from './config/index.js'
 import type { Database } from './db/index.js'
 import type { Auth } from './modules/auth/index.js'
@@ -14,12 +13,9 @@ import { createInvitationService } from './modules/invitations/index.js'
 import { createAttemptService } from './modules/attempts/index.js'
 import { createLiveKitService } from './modules/livekit/index.js'
 import { createRecordingService } from './modules/recordings/index.js'
-import { createNotificationService } from './modules/notifications/index.js'
-import { createOrganizationService } from './modules/organizations/index.js'
 import { createResourceService } from './modules/resources/index.js'
 import { createErrorHandler, notFoundHandler } from './http/error-handler.js'
 import { sanitizeRequestUrl } from './http/logging.js'
-import { ForbiddenError } from './http/errors.js'
 import { createRequireAuth, getAuthContext, requireRole } from './http/middleware/auth.js'
 import { createAssessmentRouter } from './http/routes/assessments.js'
 import { createInvitationRouter } from './http/routes/invitations.js'
@@ -75,25 +71,23 @@ export function createApp(dependencies: { config: AppConfig; db: Database; auth:
   const assessments = createAssessmentService(db)
   const resources = createResourceService(db, config)
   const generator = createAssessmentGenerator(config)
-  const notifications = createNotificationService(config)
-  const invitations = createInvitationService(db, notifications, config, logger, livekit.closeRooms)
-  const organizations = createOrganizationService(db)
+  const invitations = createInvitationService(db, config, logger, livekit.closeRooms, async (input) => {
+    await auth.api.signInMagicLink({
+      headers: new Headers({ origin: config.frontendUrl }),
+      body: {
+        email: input.email,
+        callbackURL: input.callbackUrl,
+        newUserCallbackURL: input.callbackUrl,
+        errorCallbackURL: `${config.frontendUrl}/employee/sign-in?reason=invalid-link`,
+        metadata: { invitationToken: input.invitationToken },
+      },
+    })
+  })
   const requireAuth = createRequireAuth(auth, db)
 
   app.get('/health', async (_request, response) => {
     await db.execute(sql`select 1`)
     response.send({ status: 'ok' })
-  })
-
-  app.post('/api/bootstrap', async (request, response) => {
-    const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) })
-    if (!session) throw new ForbiddenError('Sign in before bootstrapping the organization')
-    const body = z.object({
-      organizationName: z.string().trim().min(1).max(200),
-      slug: z.string().trim().min(2).max(100).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
-    }).parse(request.body)
-    const membership = await organizations.bootstrapAdmin({ userId: session.user.id, ...body })
-    response.status(201).send({ data: membership })
   })
 
   app.get('/api/me', requireAuth, (request, response) => {

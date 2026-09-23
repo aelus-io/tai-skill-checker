@@ -11,6 +11,12 @@ const EnvSchema = z.object({
   BETTER_AUTH_SECRET: z.string().min(32),
   BETTER_AUTH_URL: z.url(),
   FRONTEND_URL: z.url(),
+  ADMIN_NAME: z.string().trim().min(1).max(200).default('Admin'),
+  ADMIN_EMAIL: z.email(),
+  ADMIN_PASSWORD: z.string().min(12).max(128),
+  ORGANIZATION_NAME: z.string().trim().min(1).max(200),
+  ORGANIZATION_SLUG: z.string().trim().min(2).max(100).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  MAGIC_LINK_TTL_MINUTES: z.coerce.number().int().min(5).max(60).default(15),
   GOOGLE_GENERATIVE_AI_API_KEY: optional(z.string().min(1)),
   GEMINI_MODEL: z.string().min(1).refine(
     (model) => !model.toLowerCase().includes('live'),
@@ -51,6 +57,12 @@ export type AppConfig = {
   authSecret: string
   authUrl: string
   frontendUrl: string
+  adminName: string
+  adminEmail: string
+  adminPassword: string
+  organizationName: string
+  organizationSlug: string
+  magicLinkTtlMinutes: number
   geminiApiKey?: string
   geminiModel: string
   geminiLiveModel: string
@@ -82,6 +94,12 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
     authSecret: env.BETTER_AUTH_SECRET,
     authUrl: env.BETTER_AUTH_URL,
     frontendUrl: env.FRONTEND_URL,
+    adminName: env.ADMIN_NAME,
+    adminEmail: env.ADMIN_EMAIL.trim().toLocaleLowerCase(),
+    adminPassword: env.ADMIN_PASSWORD,
+    organizationName: env.ORGANIZATION_NAME,
+    organizationSlug: env.ORGANIZATION_SLUG,
+    magicLinkTtlMinutes: env.MAGIC_LINK_TTL_MINUTES,
     ...(env.GOOGLE_GENERATIVE_AI_API_KEY ? { geminiApiKey: env.GOOGLE_GENERATIVE_AI_API_KEY } : {}),
     geminiModel: env.GEMINI_MODEL,
     geminiLiveModel: env.GEMINI_LIVE_MODEL,

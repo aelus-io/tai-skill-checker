@@ -6,7 +6,7 @@ Backend for creating, assigning, and running realtime AI skill assessments.
 
 - Node.js 22+, Express 5, strict TypeScript
 - Neon PostgreSQL, Drizzle ORM, pgvector
-- Better Auth with email and password
+- Better Auth with password access for the configured admin and invitation-scoped magic links for employees
 - Gemini structured generation
 - Resend invitation delivery
 - Pino logging, Zod validation, Vitest
@@ -36,28 +36,13 @@ Backend for creating, assigning, and running realtime AI skill assessments.
    npm run build
    ```
 
-## First admin
+## Administrator provisioning
 
-Create the first user with `POST /api/auth/sign-up/email`:
+Set `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ORGANIZATION_NAME`, and `ORGANIZATION_SLUG` before starting the API. Startup idempotently creates the configured Better Auth user and ensures that user has the `ADMIN` membership in the single organization. Public password sign-up is disabled. `ADMIN_PASSWORD` is used only when the admin user is first created; changing it later does not reset an existing password.
 
-```json
-{
-  "name": "Admin",
-  "email": "admin@example.com",
-  "password": "a-secure-password"
-}
-```
+Employees do not use passwords. Invitation delivery sends a short-lived Better Auth magic link. Verification creates the employee session and redirects to the invitation preview, where the employee must explicitly accept before any membership or assignment access is granted.
 
-With the returned session cookie, call `POST /api/bootstrap` once:
-
-```json
-{
-  "organizationName": "Example Company",
-  "slug": "example-company"
-}
-```
-
-Only the first authenticated user can bootstrap the single prototype organization. Later users enter through invitations.
+After acceptance, employees can request a fresh one-time sign-in link using their email address. The employee dashboard lists every assignment bound to that account, including remaining attempts and whether another attempt is available. Successful completion remains final unless an administrator explicitly reinvites and resets the assignment.
 
 ## API flow
 
@@ -66,7 +51,6 @@ All admin endpoints require a Better Auth session cookie and an `ADMIN` organiza
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/health` | Database backed health check |
-| `POST` | `/api/bootstrap` | Create the one organization and first admin membership |
 | `GET/POST` | `/api/assessments` | List or create assessments |
 | `GET/PUT` | `/api/assessments/:id` | Read or edit the current draft |
 | `POST/PUT` | `/api/assessments/:id/scenarios[/scenarioId]` | Add or edit a draft scenario |
@@ -81,7 +65,9 @@ All admin endpoints require a Better Auth session cookie and an `ADMIN` organiza
 | `GET` | `/api/assessments/:id/invitations` | List invited employees and their current attempt allowance |
 | `POST` | `/api/assessments/:id/invitations/:invitationId/reinvite` | Rotate the invitation and grant a fresh attempt allowance |
 | `GET` | `/api/invitations/:token` | Read employee safe invitation preview |
+| `POST` | `/api/invitations/:token/sign-in` | Send a fresh invitation-scoped employee magic link |
 | `POST` | `/api/invitations/:token/accept` | Bind the assignment to the matching signed in employee |
+| `GET` | `/api/assignments` | List assignments belonging to the authenticated employee |
 | `GET` | `/api/assignments/:id/preparation` | Read preparation details without consuming an attempt |
 | `POST` | `/api/assignments/:id/attempts` | Atomically consume an attempt and start its LiveKit session |
 | `GET` | `/api/admin/attempts/active` | List live attempts for the organization |
@@ -92,7 +78,7 @@ All admin endpoints require a Better Auth session cookie and an `ADMIN` organiza
 
 Generation accepts a `brief` and optional `sourceText`. It returns and persists editable scenarios, competencies, mappings, and rubrics. Publication requires every scenario to have a valid competency mapping and every competency to have a rubric.
 
-Invitation recipients follow the emailed link, create or sign into a Better Auth account with the invited email, then accept the invitation. Acceptance consumes the invitation secret, creates the employee membership, and binds the assignment to that user. Preview responses expose competencies but omit scenarios and rubrics.
+Invitation recipients follow the emailed magic link, which verifies their email and creates a Better Auth session, then explicitly accept the invitation. Acceptance consumes the invitation secret, creates the employee membership, and binds the assignment to that user. Preview responses expose competencies but omit scenarios and rubrics. A logged-out recipient can request a fresh magic link from the invitation page.
 
 PDF uploads are extracted, chunked, embedded, and stored in pgvector when Gemini is configured. A failed or previously unconfigured resource can be retried with `POST /api/assessments/:assessmentId/resources/:resourceId/process`. Publication requires every uploaded resource to be ready and snapshots its chunks into the immutable version.
 
@@ -106,6 +92,7 @@ Run the API and agent worker as separate processes. Starting an attempt creates 
 - Published content has no update API and PostgreSQL triggers reject updates or deletes.
 - Assignments always reference the exact published version used for the invitation.
 - Invitation tokens are random, stored as SHA-256 hashes, expire, and are rotated after acceptance.
+- Magic-link tokens are hashed, short-lived, and can only be sent when paired with a matching pending invitation.
 - PDF uploads validate both MIME type and the PDF file signature and are stored outside the public web root.
 - Attempt numbers are allocated while holding an assignment row lock, so the configured limit remains safe under concurrent starts.
 - Resource retrieval includes organization, assessment, and exact published version scope.

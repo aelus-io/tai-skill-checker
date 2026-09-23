@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { waitForRealtimeInfrastructure } from '../index.js'
 
 describe('LiveKit session provisioning', () => {
-  it('waits until both the agent and recording are ready', async () => {
+  it('waits until the agent joins and recording startup is accepted', async () => {
     const listParticipants = vi.fn()
       .mockResolvedValueOnce([])
       .mockResolvedValue([{ kind: ParticipantInfo_Kind.AGENT }])
@@ -18,10 +18,21 @@ describe('LiveKit session provisioning', () => {
       egressClient: { listEgress },
       timeoutMs: 100,
       pollIntervalMs: 0,
-    })).resolves.toBeUndefined()
+    })).resolves.toBe(EgressStatus.EGRESS_ACTIVE)
 
     expect(listParticipants).toHaveBeenCalledTimes(2)
     expect(listEgress).toHaveBeenCalledWith({ egressId: 'egress-1' })
+  })
+
+  it('allows the participant to join while recording is still starting', async () => {
+    await expect(waitForRealtimeInfrastructure({
+      roomName: 'assessment-attempt-1',
+      egressId: 'egress-1',
+      roomClient: { listParticipants: vi.fn().mockResolvedValue([{ kind: ParticipantInfo_Kind.AGENT }]) },
+      egressClient: { listEgress: vi.fn().mockResolvedValue([{ status: EgressStatus.EGRESS_STARTING }]) },
+      timeoutMs: 100,
+      pollIntervalMs: 0,
+    })).resolves.toBe(EgressStatus.EGRESS_STARTING)
   })
 
   it('fails provisioning with the recording service error', async () => {

@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto'
+import { randomBytes } from 'node:crypto'
 import { and, asc, eq, inArray } from 'drizzle-orm'
 import type { Logger } from 'pino'
 import type { AppConfig } from '../../../config/index.js'
@@ -12,37 +12,33 @@ import {
   competencies,
   invitations,
   organizationMemberships,
+  users,
 } from '../../../db/schema.js'
-import { AppError, ConfigurationError, ConflictError, ForbiddenError, NotFoundError } from '../../../http/errors.js'
-import type { NotificationService } from '../../notifications/index.js'
+import { AppError, ConflictError, ForbiddenError, NotFoundError } from '../../../http/errors.js'
+import { hashInvitationToken } from './tokens.js'
 
 const normalizeEmail = (email: string) => email.trim().toLocaleLowerCase()
-const hashToken = (token: string) => createHash('sha256').update(token).digest('hex')
+
+type SendEmployeeSignInLink = (input: {
+  email: string
+  invitationToken: string
+  callbackUrl: string
+}) => Promise<void>
 
 export function createInvitationService(
   db: Database,
-  notifications: NotificationService,
   config: Pick<AppConfig, 'frontendUrl' | 'invitationTtlHours' | 'maxAssessmentAttempts'>,
   logger: Logger,
   closeRooms: (roomNames: string[]) => Promise<void>,
+  sendEmployeeSignInLink: SendEmployeeSignInLink,
 ) {
-  async function deliverInvitation(input: { invitationId: string; organizationId: string; email: string; assessmentName: string; token: string; expiresAt: Date; idempotencyKey: string }) {
+  async function deliverInvitation(input: { invitationId: string; organizationId: string; email: string; token: string }) {
     try {
-      for (let attempt = 1; attempt <= 3; attempt += 1) {
-        try {
-          await notifications.sendInvitation({
-            idempotencyKey: input.idempotencyKey,
-            to: input.email,
-            assessmentName: input.assessmentName,
-            invitationUrl: `${config.frontendUrl}/invitations/${encodeURIComponent(input.token)}`,
-            expiresAt: input.expiresAt,
-          })
-          break
-        } catch (error) {
-          if (attempt === 3) throw error
-          await new Promise((resolve) => setTimeout(resolve, attempt * 250))
-        }
-      }
+      await sendEmployeeSignInLink({
+        email: input.email,
+        invitationToken: input.token,
+        callbackUrl: `${config.frontendUrl}/invitations/${encodeURIComponent(input.token)}`,
+      })
       await db.update(invitations).set({ emailSentAt: new Date(), emailError: null }).where(eq(invitations.id, input.invitationId))
       return true
     } catch (error) {
@@ -54,12 +50,20 @@ export function createInvitationService(
   }
 
   async function invite(input: { organizationId: string; assessmentId: string; userId: string; emails: string[] }) {
-    if (!notifications.isConfigured) throw new ConfigurationError('Resend invitation delivery')
     const emails = [...new Set(input.emails.map(normalizeEmail))]
     const [assessment] = await db.select().from(assessments).where(and(eq(assessments.id, input.assessmentId), eq(assessments.organizationId, input.organizationId))).limit(1)
     if (!assessment?.currentPublishedVersionId || assessment.status !== 'PUBLISHED') {
       throw new ConflictError('ASSESSMENT_NOT_PUBLISHED', 'Publish the assessment before inviting employees')
     }
+    const adminEmails = await db.select({ email: users.email }).from(users).innerJoin(
+      organizationMemberships,
+      eq(organizationMemberships.userId, users.id),
+    ).where(and(
+      eq(organizationMemberships.organizationId, input.organizationId),
+      eq(organizationMemberships.role, 'ADMIN'),
+      inArray(users.email, emails),
+    ))
+    if (adminEmails.length) throw new ConflictError('ADMIN_CANNOT_BE_INVITED', `Administrators cannot be invited as employees: ${adminEmails.map((row) => row.email).join(', ')}`)
     const existing = await db.select({ email: invitations.email }).from(invitations).where(and(
       eq(invitations.organizationId, input.organizationId),
       eq(invitations.assessmentVersionId, assessment.currentPublishedVersionId),
@@ -77,7 +81,7 @@ export function createInvitationService(
           assessmentId: assessment.id,
           assessmentVersionId: assessment.currentPublishedVersionId!,
           email: item.email,
-          tokenHash: hashToken(item.token),
+          tokenHash: hashInvitationToken(item.token),
           expiresAt,
           createdBy: input.userId,
         }).returning()
@@ -102,10 +106,7 @@ export function createInvitationService(
         invitationId: item.invitation.id,
         organizationId: input.organizationId,
         email: item.invitation.email,
-        assessmentName: assessment.name,
         token: item.token,
-        expiresAt,
-        idempotencyKey: `invitation-${item.invitation.id}`,
       }),
     })))
     return { expiresAt, invitations: deliveries }
@@ -140,7 +141,6 @@ export function createInvitationService(
   }
 
   async function reinvite(input: { organizationId: string; assessmentId: string; invitationId: string; userId: string }) {
-    if (!notifications.isConfigured) throw new ConfigurationError('Resend invitation delivery')
     const token = randomBytes(32).toString('base64url')
     const expiresAt = new Date(Date.now() + config.invitationTtlHours * 60 * 60 * 1_000)
     const resetAt = new Date()
@@ -172,7 +172,7 @@ export function createInvitationService(
       }
       await tx.update(invitations).set({
         status: 'PENDING',
-        tokenHash: hashToken(token),
+        tokenHash: hashInvitationToken(token),
         expiresAt,
         acceptedAt: null,
         emailSentAt: null,
@@ -180,32 +180,25 @@ export function createInvitationService(
         createdBy: input.userId,
       }).where(eq(invitations.id, invitation.id))
       await tx.update(assignments).set({ status: 'PENDING', attemptsResetAt: resetAt, updatedAt: resetAt }).where(eq(assignments.id, assignment.id))
-      const [assessment] = await tx.select({ name: assessments.name }).from(assessments).where(and(
-        eq(assessments.id, invitation.assessmentId),
-        eq(assessments.organizationId, input.organizationId),
-      )).limit(1)
-      if (!assessment) throw new NotFoundError('Assessment')
-      return { invitation, assessment, roomNames: active.flatMap((attempt) => attempt.roomName ? [attempt.roomName] : []) }
+      return { invitation, roomNames: active.flatMap((attempt) => attempt.roomName ? [attempt.roomName] : []) }
     })
     await closeRooms(result.roomNames)
     const sent = await deliverInvitation({
       invitationId: result.invitation.id,
       organizationId: input.organizationId,
       email: result.invitation.email,
-      assessmentName: result.assessment.name,
       token,
-      expiresAt,
-      idempotencyKey: `reinvitation-${result.invitation.id}-${hashToken(token).slice(0, 12)}`,
     })
     return { invitationId: result.invitation.id, email: result.invitation.email, expiresAt, sent, attemptsRemaining: config.maxAssessmentAttempts }
   }
 
-  async function preview(rawToken: string) {
-    const tokenHash = hashToken(rawToken)
+  async function getPendingInvitation(rawToken: string) {
+    const tokenHash = hashInvitationToken(rawToken)
     const [row] = await db.select({
       invitationId: invitations.id,
       status: invitations.status,
       expiresAt: invitations.expiresAt,
+      emailSentAt: invitations.emailSentAt,
       email: invitations.email,
       assessmentVersionId: invitations.assessmentVersionId,
       name: assessmentVersions.name,
@@ -218,12 +211,17 @@ export function createInvitationService(
       await db.update(invitations).set({ status: 'EXPIRED' }).where(eq(invitations.id, row.invitationId))
       throw new AppError('INVITATION_EXPIRED', 'This invitation has expired', 410)
     }
+    return row
+  }
+
+  async function preview(rawToken: string) {
+    const row = await getPendingInvitation(rawToken)
     const visibleCompetencies = await db.select({ name: competencies.name, description: competencies.description }).from(competencies).where(eq(competencies.assessmentVersionId, row.assessmentVersionId))
     return { email: row.email, expiresAt: row.expiresAt, assessment: { name: row.name, description: row.description, preparationInstructions: row.preparationInstructions, competencies: visibleCompetencies } }
   }
 
   async function accept(input: { rawToken: string; userId: string; userEmail: string }) {
-    const tokenHash = hashToken(input.rawToken)
+    const tokenHash = hashInvitationToken(input.rawToken)
     const result = await db.transaction(async (tx) => {
       const [invitation] = await tx.select().from(invitations).where(eq(invitations.tokenHash, tokenHash)).for('update').limit(1)
       if (!invitation) throw new NotFoundError('Invitation')
@@ -233,8 +231,13 @@ export function createInvitationService(
         await tx.update(invitations).set({ status: 'EXPIRED' }).where(eq(invitations.id, invitation.id))
         return { expired: true as const }
       }
+      const [membership] = await tx.select({ role: organizationMemberships.role }).from(organizationMemberships).where(and(
+        eq(organizationMemberships.organizationId, invitation.organizationId),
+        eq(organizationMemberships.userId, input.userId),
+      )).limit(1)
+      if (membership?.role === 'ADMIN') throw new ConflictError('ADMIN_CANNOT_ACCEPT', 'Administrators cannot accept employee invitations')
 
-      await tx.update(invitations).set({ status: 'ACCEPTED', acceptedAt: new Date(), tokenHash: hashToken(randomBytes(32).toString('base64url')) }).where(eq(invitations.id, invitation.id))
+      await tx.update(invitations).set({ status: 'ACCEPTED', acceptedAt: new Date(), tokenHash: hashInvitationToken(randomBytes(32).toString('base64url')) }).where(eq(invitations.id, invitation.id))
       const [assignment] = await tx.update(assignments).set({ employeeUserId: input.userId, status: 'READY', updatedAt: new Date() }).where(eq(assignments.invitationId, invitation.id)).returning()
       if (!assignment) throw new Error('Invitation has no assignment')
       await tx.insert(organizationMemberships).values({ organizationId: invitation.organizationId, userId: input.userId, role: 'EMPLOYEE' }).onConflictDoNothing()
@@ -244,7 +247,26 @@ export function createInvitationService(
     return result.assignment
   }
 
-  return { invite, list, reinvite, preview, accept }
+  async function requestSignIn(rawToken: string) {
+    const invitation = await getPendingInvitation(rawToken)
+    if (invitation.emailSentAt && invitation.emailSentAt > new Date(Date.now() - 60_000)) {
+      throw new AppError('MAGIC_LINK_RATE_LIMITED', 'Wait a minute before requesting another secure link', 429)
+    }
+    try {
+      await sendEmployeeSignInLink({
+        email: invitation.email,
+        invitationToken: rawToken,
+        callbackUrl: `${config.frontendUrl}/invitations/${encodeURIComponent(rawToken)}`,
+      })
+      await db.update(invitations).set({ emailSentAt: new Date(), emailError: null }).where(eq(invitations.id, invitation.invitationId))
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown delivery error'
+      await db.update(invitations).set({ emailError: message.slice(0, 1_000) }).where(eq(invitations.id, invitation.invitationId))
+      throw error
+    }
+  }
+
+  return { invite, list, reinvite, preview, accept, requestSignIn }
 }
 
 export type InvitationService = ReturnType<typeof createInvitationService>
