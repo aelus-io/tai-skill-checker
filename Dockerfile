@@ -13,11 +13,12 @@ FROM node:22-bookworm-slim AS runtime
 
 ENV NODE_ENV=production
 ENV PORT=3000
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 
 WORKDIR /app
 
 RUN apt-get update \
-  && apt-get install --yes --no-install-recommends tini \
+  && apt-get install --yes --no-install-recommends ca-certificates tini \
   && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
