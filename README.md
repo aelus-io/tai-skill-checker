@@ -12,11 +12,12 @@ Backend for creating, assigning, and running realtime AI skill assessments.
 - Pino logging, Zod validation, Vitest
 - LiveKit rooms, agent dispatch, audio egress, and verified webhooks
 - Gemini Live interviewer and Gemini embeddings
+- Anthropic post-interview evaluation through the official TypeScript SDK
 - Private Cloudflare R2 recordings
 
 ## Setup
 
-1. Copy `.env.example` to `.env` and configure the database and auth settings. Realtime assessments also require Gemini, LiveKit, and all R2 settings. Resend is required for invitations.
+1. Copy `.env.example` to `.env` and configure the database and auth settings. Realtime assessments also require Gemini, LiveKit, and all R2 settings. Post-interview evaluation requires `ANTHROPIC_API_KEY` plus either `ANTHROPIC_MODEL` or the evaluation-specific `ANTHROPIC_EVALUATION_MODEL`. An Anthropic-compatible AWS gateway can also set `ANTHROPIC_BASE_URL`, `ANTHROPIC_WORKSPACE_ID`, and `ANTHROPIC_WORKSPACE_HEADER`. Resend is required for invitations.
 2. Install dependencies and migrate a clean Neon database:
 
    ```sh
@@ -101,6 +102,8 @@ All admin endpoints require a Better Auth session cookie and an `ADMIN` organiza
 | `POST` | `/api/attempts/:id/abandon` | Persist an employee-ended attempt and close its LiveKit room |
 | `GET` | `/api/admin/attempts/active` | List live attempts for the organization |
 | `GET` | `/api/admin/attempts/:id` | Read scenario progress, transcript, and lifecycle events |
+| `GET` | `/api/admin/evaluations` | List organization evaluations, optionally filtered by status and assessment |
+| `POST` | `/api/admin/evaluations/:id/retry` | Return one failed evaluation to the durable queue |
 | `POST` | `/api/admin/attempts/:id/observer-token` | Create a short lived, listen only admin token |
 | `GET` | `/api/admin/attempts/:id/recording` | Create a short lived R2 playback URL |
 | `POST` | `/api/webhooks/livekit` | Receive signed LiveKit lifecycle and egress events |
@@ -111,7 +114,9 @@ Invitation recipients follow the emailed magic link, which verifies their email 
 
 PDF uploads are extracted, chunked, embedded, and stored in pgvector when Gemini is configured. A failed or previously unconfigured resource can be retried with `POST /api/assessments/:assessmentId/resources/:resourceId/process`. Publication requires every uploaded resource to be ready and snapshots its chunks into the immutable version.
 
-Run the API and agent worker as separate processes. Starting an attempt creates `assessment-attempt-{attemptId}`, dispatches the named worker, begins audio only egress to private R2, and returns a five minute employee token. Leaving the room makes an active attempt `ABANDONED`; a new start consumes the next attempt. Calling the agent's completion tool locks the assignment and moves the attempt to `PROCESSING` for Phase 3 evaluation.
+Run the API and agent worker as separate processes. Starting an attempt creates `assessment-attempt-{attemptId}`, dispatches the named worker, begins audio only egress to private R2, and returns a five minute employee token. Leaving the room makes an active attempt `ABANDONED`; a new start consumes the next attempt. Calling the agent's completion tool locks the assignment, moves the attempt to `PROCESSING`, and creates its unique evaluation queue row in the same transaction.
+
+The API process also runs the database-backed evaluation worker. It atomically claims queued rows, recovers claims older than ten minutes after a crash, and validates all Anthropic output against the exact published version and employee transcript turns. Valid results and the `PROCESSING -> COMPLETED` attempt transition commit together. Invalid output, missing configuration, and provider failures leave the transcript intact and create a sanitized `FAILED` evaluation that an admin can retry. Manually ended or disconnected attempts never enter this queue.
 
 ## Domain guarantees
 
@@ -127,4 +132,6 @@ Run the API and agent worker as separate processes. Starting an attempt creates 
 - Resource retrieval includes organization, assessment, and exact published version scope.
 - Employee tokens can publish audio; admin observer tokens are hidden and cannot publish media or data.
 - LiveKit webhook signatures are verified before lifecycle or recording state changes.
+- One unique evaluation exists per attempt; claims use row locks and stale-claim recovery, and scores/evidence are committed atomically.
+- Evaluation routes are admin-only and organization-scoped. Employee APIs never return rubrics, scores, evidence, or evaluator state.
 - Provider secrets, invitation tokens, cookies, and authorization headers are redacted from logs.

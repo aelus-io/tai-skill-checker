@@ -3,9 +3,10 @@ import { z } from 'zod'
 import type { AttemptService } from '../../modules/attempts/index.js'
 import type { LiveKitService } from '../../modules/livekit/index.js'
 import type { RecordingService } from '../../modules/recordings/index.js'
+import type { EvaluationService } from '../../modules/evaluation/index.js'
 import { getAuthContext, requireRole } from '../middleware/auth.js'
 
-export function createAttemptRouter(dependencies: { attempts: AttemptService; livekit: LiveKitService; recordings: RecordingService }) {
+export function createAttemptRouter(dependencies: { attempts: AttemptService; livekit: LiveKitService; recordings: RecordingService; evaluations: Pick<EvaluationService, 'getForAttempt'> }) {
   const router = Router()
   router.get('/assignments', requireRole('EMPLOYEE'), async (request, response) => {
     const auth = getAuthContext(request)
@@ -33,7 +34,7 @@ export function createAttemptRouter(dependencies: { attempts: AttemptService; li
     response.send({ data: { status: result.status } })
   })
   router.get('/admin/attempts/active', requireRole('ADMIN'), async (request, response) => { const auth = getAuthContext(request); response.send({ data: await dependencies.attempts.inspectActive(auth.organizationId) }) })
-  router.get('/admin/attempts/:attemptId', requireRole('ADMIN'), async (request, response) => { const auth = getAuthContext(request); const { attemptId } = z.object({ attemptId: z.uuid() }).parse(request.params); response.send({ data: await dependencies.attempts.inspect(auth.organizationId, attemptId) }) })
+  router.get('/admin/attempts/:attemptId', requireRole('ADMIN'), async (request, response) => { const auth = getAuthContext(request); const { attemptId } = z.object({ attemptId: z.uuid() }).parse(request.params); const inspection = await dependencies.attempts.inspect(auth.organizationId, attemptId); const evaluation = await dependencies.evaluations.getForAttempt(auth.organizationId, attemptId); response.send({ data: { ...inspection, evaluation } }) })
   router.post('/admin/attempts/:attemptId/observer-token', requireRole('ADMIN'), async (request, response) => { const auth = getAuthContext(request); const { attemptId } = z.object({ attemptId: z.uuid() }).parse(request.params); response.send({ data: await dependencies.livekit.observerToken({ organizationId: auth.organizationId, attemptId, adminUserId: auth.userId }) }) })
   router.get('/admin/attempts/:attemptId/recording', requireRole('ADMIN'), async (request, response) => { const auth = getAuthContext(request); const { attemptId } = z.object({ attemptId: z.uuid() }).parse(request.params); response.send({ data: await dependencies.recordings.getPlayback(auth.organizationId, attemptId) }) })
   return router

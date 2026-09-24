@@ -8,6 +8,7 @@ import type { Logger } from 'pino'
 import type { AppConfig } from './config/index.js'
 import type { Database } from './db/index.js'
 import type { Auth } from './modules/auth/index.js'
+import type { EvaluationService } from './modules/evaluation/index.js'
 import { createAssessmentGenerator, createAssessmentService } from './modules/assessments/index.js'
 import { createInvitationService } from './modules/invitations/index.js'
 import { createAttemptService } from './modules/attempts/index.js'
@@ -20,9 +21,10 @@ import { createRequireAuth, getAuthContext, requireRole } from './http/middlewar
 import { createAssessmentRouter } from './http/routes/assessments.js'
 import { createInvitationRouter } from './http/routes/invitations.js'
 import { createAttemptRouter } from './http/routes/attempts.js'
+import { createEvaluationRouter } from './http/routes/evaluations.js'
 
-export function createApp(dependencies: { config: AppConfig; db: Database; auth: Auth; logger: Logger }) {
-  const { config, db, auth, logger } = dependencies
+export function createApp(dependencies: { config: AppConfig; db: Database; auth: Auth; logger: Logger; evaluations: EvaluationService }) {
+  const { config, db, auth, logger, evaluations } = dependencies
   const app = express()
 
   app.disable('x-powered-by')
@@ -96,7 +98,8 @@ export function createApp(dependencies: { config: AppConfig; db: Database; auth:
   })
 
   app.use('/api/invitations', createInvitationRouter(invitations, auth))
-  app.use('/api', requireAuth, createAttemptRouter({ attempts, livekit, recordings }))
+  app.use('/api', requireAuth, createAttemptRouter({ attempts, livekit, recordings, evaluations }))
+  app.use('/api/admin/evaluations', requireAuth, createEvaluationRouter(evaluations))
   app.use('/api/assessments', requireAuth, requireRole('ADMIN'), createAssessmentRouter({ assessments, resources, generator, invitations, config }))
 
   app.use(notFoundHandler)

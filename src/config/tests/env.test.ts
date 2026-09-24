@@ -24,9 +24,34 @@ describe('environment configuration', () => {
   })
 
   it('treats blank optional provider settings as unconfigured', () => {
-    const config = loadConfig({ ...valid, LIVEKIT_URL: '', LIVEKIT_API_KEY: '', LIVEKIT_API_SECRET: '', R2_ENDPOINT: '', R2_ACCESS_KEY_ID: '', R2_SECRET_ACCESS_KEY: '', R2_BUCKET_NAME: '' })
+    const config = loadConfig({ ...valid, ANTHROPIC_API_KEY: '', ANTHROPIC_BASE_URL: '', ANTHROPIC_WORKSPACE_ID: '', ANTHROPIC_MODEL: '', ANTHROPIC_EVALUATION_MODEL: '', LIVEKIT_URL: '', LIVEKIT_API_KEY: '', LIVEKIT_API_SECRET: '', R2_ENDPOINT: '', R2_ACCESS_KEY_ID: '', R2_SECRET_ACCESS_KEY: '', R2_BUCKET_NAME: '' })
     expect(config.livekitUrl).toBeUndefined()
     expect(config.r2Endpoint).toBeUndefined()
+    expect(config.anthropicApiKey).toBeUndefined()
+  })
+
+  it('loads Anthropic evaluation configuration without affecting Gemini models', () => {
+    const config = loadConfig({
+      ...valid,
+      ANTHROPIC_API_KEY: 'anthropic-test',
+      ANTHROPIC_BASE_URL: 'https://aws-external-anthropic.us-east-1.api.aws',
+      ANTHROPIC_WORKSPACE_ID: 'workspace-test',
+      ANTHROPIC_WORKSPACE_HEADER: 'anthropic-workspace-id',
+      ANTHROPIC_MODEL: 'claude-sonnet-4-5',
+    })
+    expect(config).toMatchObject({
+      anthropicApiKey: 'anthropic-test',
+      anthropicBaseUrl: 'https://aws-external-anthropic.us-east-1.api.aws',
+      anthropicWorkspaceId: 'workspace-test',
+      anthropicWorkspaceHeader: 'anthropic-workspace-id',
+      anthropicEvaluationModel: 'claude-sonnet-4-5',
+      geminiModel: 'gemini-3-flash-preview',
+    })
+  })
+
+  it('prefers the evaluation-specific model override and rejects unsafe header names', () => {
+    expect(loadConfig({ ...valid, ANTHROPIC_MODEL: 'shared-model', ANTHROPIC_EVALUATION_MODEL: 'evaluation-model' }).anthropicEvaluationModel).toBe('evaluation-model')
+    expect(() => loadConfig({ ...valid, ANTHROPIC_WORKSPACE_HEADER: 'invalid header' })).toThrow()
   })
 
   it('rejects a Live-only model for assessment generation', () => {

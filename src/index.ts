@@ -6,6 +6,8 @@ import { createDatabase } from './db/index.js'
 import { createAuth, provisionAdminUser } from './modules/auth/index.js'
 import { createNotificationService } from './modules/notifications/index.js'
 import { createOrganizationService } from './modules/organizations/index.js'
+import Anthropic from '@anthropic-ai/sdk'
+import { createAnthropicEvaluator, createEvaluationService, createEvaluationWorker } from './modules/evaluation/index.js'
 
 const config = loadConfig()
 const logger = createLogger(config)
@@ -20,22 +22,39 @@ await organizations.ensureAdminMembership({
   slug: config.organizationSlug,
 })
 const auth = createAuth(database.db, config, notifications.sendMagicLink)
-const app = createApp({ config, db: database.db, auth, logger })
+const anthropic = config.anthropicApiKey ? new Anthropic({
+  apiKey: config.anthropicApiKey,
+  ...(config.anthropicBaseUrl ? { baseURL: config.anthropicBaseUrl } : {}),
+  ...(config.anthropicWorkspaceId ? { defaultHeaders: { [config.anthropicWorkspaceHeader]: config.anthropicWorkspaceId } } : {}),
+  maxRetries: 2,
+  timeout: 60_000,
+}) : undefined
+const evaluator = createAnthropicEvaluator({ ...(anthropic ? { client: anthropic } : {}), ...(config.anthropicEvaluationModel ? { model: config.anthropicEvaluationModel } : {}) })
+const evaluations = createEvaluationService(database.db, evaluator)
+const evaluationWorker = createEvaluationWorker(evaluations, logger)
+const app = createApp({ config, db: database.db, auth, logger, evaluations })
 const server = createServer(app)
+let shuttingDown = false
 
 server.listen(config.port, () => {
+  evaluationWorker.start()
   logger.info({ port: config.port }, 'Backend listening')
 })
 
 async function shutdown(signal: string) {
+  if (shuttingDown) return
+  shuttingDown = true
   logger.info({ signal }, 'Shutting down')
-  server.close(async (error) => {
-    await database.close()
-    if (error) {
-      logger.error({ err: error }, 'HTTP server shutdown failed')
-      process.exitCode = 1
-    }
+  const closeServer = new Promise<Error | undefined>((resolve) => {
+    server.close((error) => resolve(error))
   })
+  await evaluationWorker.stop()
+  const error = await closeServer
+  await database.close()
+  if (error) {
+    logger.error({ err: error }, 'HTTP server shutdown failed')
+    process.exitCode = 1
+  }
 }
 
 process.once('SIGINT', () => void shutdown('SIGINT'))

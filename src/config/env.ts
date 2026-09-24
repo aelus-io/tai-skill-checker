@@ -18,6 +18,12 @@ const EnvSchema = z.object({
   ORGANIZATION_SLUG: z.string().trim().min(2).max(100).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
   MAGIC_LINK_TTL_MINUTES: z.coerce.number().int().min(5).max(60).default(15),
   GOOGLE_GENERATIVE_AI_API_KEY: optional(z.string().min(1)),
+  ANTHROPIC_API_KEY: optional(z.string().min(1)),
+  ANTHROPIC_BASE_URL: optional(z.url()),
+  ANTHROPIC_WORKSPACE_ID: optional(z.string().trim().min(1).max(200)),
+  ANTHROPIC_WORKSPACE_HEADER: z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9-]+$/).default('anthropic-workspace-id'),
+  ANTHROPIC_MODEL: optional(z.string().trim().min(1)),
+  ANTHROPIC_EVALUATION_MODEL: optional(z.string().min(1)),
   GEMINI_MODEL: z.string().min(1).refine(
     (model) => !model.toLowerCase().includes('live'),
     'GEMINI_MODEL must support generateContent; configure realtime models through GEMINI_LIVE_MODEL',
@@ -64,6 +70,11 @@ export type AppConfig = {
   organizationSlug: string
   magicLinkTtlMinutes: number
   geminiApiKey?: string
+  anthropicApiKey?: string
+  anthropicBaseUrl?: string
+  anthropicWorkspaceId?: string
+  anthropicWorkspaceHeader: string
+  anthropicEvaluationModel?: string
   geminiModel: string
   geminiLiveModel: string
   geminiEmbeddingModel: string
@@ -86,6 +97,7 @@ export type AppConfig = {
 
 export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
   const env = EnvSchema.parse(source)
+  const anthropicEvaluationModel = env.ANTHROPIC_EVALUATION_MODEL ?? env.ANTHROPIC_MODEL
   return {
     nodeEnv: env.NODE_ENV,
     port: env.PORT,
@@ -101,6 +113,11 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
     organizationSlug: env.ORGANIZATION_SLUG,
     magicLinkTtlMinutes: env.MAGIC_LINK_TTL_MINUTES,
     ...(env.GOOGLE_GENERATIVE_AI_API_KEY ? { geminiApiKey: env.GOOGLE_GENERATIVE_AI_API_KEY } : {}),
+    ...(env.ANTHROPIC_API_KEY ? { anthropicApiKey: env.ANTHROPIC_API_KEY } : {}),
+    ...(env.ANTHROPIC_BASE_URL ? { anthropicBaseUrl: env.ANTHROPIC_BASE_URL } : {}),
+    ...(env.ANTHROPIC_WORKSPACE_ID ? { anthropicWorkspaceId: env.ANTHROPIC_WORKSPACE_ID } : {}),
+    anthropicWorkspaceHeader: env.ANTHROPIC_WORKSPACE_HEADER,
+    ...(anthropicEvaluationModel ? { anthropicEvaluationModel } : {}),
     geminiModel: env.GEMINI_MODEL,
     geminiLiveModel: env.GEMINI_LIVE_MODEL,
     geminiEmbeddingModel: env.GEMINI_EMBEDDING_MODEL,

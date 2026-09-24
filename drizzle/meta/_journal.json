@@ -50,6 +50,13 @@
       "when": 1790079995926,
       "tag": "0006_wealthy_dark_beast",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790272679333,
+      "tag": "0007_slim_wiccan",
+      "breakpoints": true
     }
   ]
 }

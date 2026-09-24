@@ -64,6 +64,41 @@ describe('assessment interviewer agent', () => {
     expect(deps.resources.retrieve).toHaveBeenCalledWith({ organizationId: trusted.organizationId, assessmentId: trusted.assessmentId, assessmentVersionId: trusted.assessmentVersionId, query: 'privacy policy' })
   })
 
+  it('returns actionable state instead of throwing when assessment completion is premature', async () => {
+    const deps = dependencies()
+    const tools = createAssessmentTools(trusted, deps.attempts, deps.resources, () => undefined)
+
+    const result = await tools.completeAssessment.execute({}, { toolCallId: 'call-1', abortSignal: new AbortController().signal } as never)
+
+    expect(result).toMatchObject({ status: 'SCENARIOS_INCOMPLETE', currentScenario: { id: 'scenario-2' } })
+    expect(deps.attempts.completeAssessment).not.toHaveBeenCalled()
+  })
+
+  it('serializes scenario and assessment completion tool calls', async () => {
+    const deps = dependencies()
+    let currentScenarioId: string | null = 'scenario-2'
+    deps.attempts.completeScenario = vi.fn().mockImplementation(async () => {
+      await Promise.resolve()
+      currentScenarioId = null
+      return { completedScenarioId: 'scenario-2', nextScenarioId: null }
+    })
+    deps.getContext.mockImplementation(async () => ({
+      attempt: { id: trusted.attemptId, currentScenarioId },
+      assessment: { name: 'AI Safety' },
+      scenarios: [{ id: 'scenario-2', title: 'Second', prompt: 'Second prompt', followUpGuidance: '', position: 2 }],
+    }))
+    const onComplete = vi.fn()
+    const tools = createAssessmentTools(trusted, deps.attempts, deps.resources, onComplete)
+
+    const scenarioCompletion = tools.completeScenario.execute({}, { toolCallId: 'call-1', abortSignal: new AbortController().signal } as never)
+    const assessmentCompletion = tools.completeAssessment.execute({}, { toolCallId: 'call-2', abortSignal: new AbortController().signal } as never)
+    const [, assessmentResult] = await Promise.all([scenarioCompletion, assessmentCompletion])
+
+    expect(assessmentResult).toEqual({ status: 'PROCESSING' })
+    expect(deps.attempts.completeAssessment).toHaveBeenCalledWith({ organizationId: 'org-1', attemptId: 'attempt-1' })
+    expect(onComplete).toHaveBeenCalledOnce()
+  })
+
   it('returns a safe tool error when a provider operation fails', async () => {
     const deps = dependencies()
     deps.resources.retrieve.mockRejectedValue(new Error('provider secret must not reach the model'))

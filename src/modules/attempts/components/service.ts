@@ -1,6 +1,6 @@
 import { and, asc, count, desc, eq, gt, inArray, isNull, max } from 'drizzle-orm'
 import type { Database } from '../../../db/index.js'
-import { assignments, attempts, attemptEvents, attemptScenarios, attemptTurns, assessmentVersions, competencies, scenarios, users } from '../../../db/schema.js'
+import { assignments, attempts, attemptEvents, attemptScenarios, attemptTurns, assessmentVersions, competencies, evaluations, scenarios, users } from '../../../db/schema.js'
 import { ConflictError, ForbiddenError, NotFoundError } from '../../../http/errors.js'
 import { assertAttemptAvailable, canTransitionAttempt, nextAttemptNumber, remainingAttempts } from './state-machine.js'
 import type { AttemptSpeaker, AttemptStatus, StartedAttempt } from '../types/index.js'
@@ -197,6 +197,7 @@ export function createAttemptService(db: Database, maxAttempts: number) {
       const now = new Date()
       await tx.update(attempts).set({ status: 'PROCESSING', currentScenarioId: null, updatedAt: now }).where(eq(attempts.id, attempt.id))
       await tx.update(assignments).set({ status: 'COMPLETED', updatedAt: now }).where(eq(assignments.id, attempt.assignmentId))
+      await tx.insert(evaluations).values({ organizationId: input.organizationId, attemptId: attempt.id, status: 'PENDING' }).onConflictDoNothing()
       await tx.insert(attemptEvents).values({ organizationId: input.organizationId, attemptId: attempt.id, type: 'ASSESSMENT_COMPLETED', payload: {}, idempotencyKey: 'assessment-completed' }).onConflictDoNothing()
       return { status: 'PROCESSING' as const }
     })

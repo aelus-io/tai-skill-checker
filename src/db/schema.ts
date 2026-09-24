@@ -334,9 +334,15 @@ export const evaluations = pgTable('evaluations', {
   gaps: text('gaps').array(),
   recommendations: text('recommendations').array(),
   errorMessage: text('error_message'),
+  claimedAt: timestamp('claimed_at', { withTimezone: true }),
+  claimToken: uuid('claim_token'),
+  attemptCount: integer('attempt_count').notNull().default(0),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
-}, (table) => [uniqueIndex('evaluations_attempt_uidx').on(table.attemptId)])
+}, (table) => [
+  uniqueIndex('evaluations_attempt_uidx').on(table.attemptId),
+  index('evaluations_status_claimed_idx').on(table.status, table.claimedAt),
+])
 
 export const competencyScores = pgTable('competency_scores', {
   id: id(),
