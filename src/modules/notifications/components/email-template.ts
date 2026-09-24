@@ -1,4 +1,4 @@
-import { emailLogoContentId, emailLogoSvg } from './email-logo.js'
+const emailLogoUrl = 'https://app.taiskill.berl.dev/assets/logo-BivntQtA.png'
 
 type MagicLinkEmailInput = {
   kind: 'invitation' | 'employee-login'
@@ -79,7 +79,7 @@ export function renderMagicLinkEmail(input: MagicLinkEmailInput) {
             <td style="padding:0 4px 20px;">
               <table role="presentation" cellspacing="0" cellpadding="0" border="0">
                 <tr>
-                  <td align="center" valign="middle" style="width:40px; height:40px;"><img src="cid:${emailLogoContentId}" width="40" height="40" alt="TAI Skill Checker" style="display:block; width:40px; height:40px; border:0; border-radius:50%;"></td>
+                  <td align="center" valign="middle" style="width:40px; height:40px;"><img src="${emailLogoUrl}" width="40" height="40" alt="TAI Skill Checker" style="display:block; width:40px; height:40px; border:0; border-radius:50%;"></td>
                   <td style="padding-left:12px; font-size:17px; font-weight:700; letter-spacing:-0.3px; color:#0a0b0d;">TAI <span style="color:#666d78; font-weight:600;">Skill Checker</span></td>
                 </tr>
               </table>
@@ -122,11 +122,5 @@ export function renderMagicLinkEmail(input: MagicLinkEmailInput) {
     subject,
     text,
     html,
-    attachments: [{
-      filename: 'tai-skill-checker-logo.svg',
-      content: Buffer.from(emailLogoSvg),
-      contentType: 'image/svg+xml',
-      contentId: emailLogoContentId,
-    }],
   }
 }

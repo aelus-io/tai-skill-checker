@@ -13,17 +13,13 @@ describe('notification email templates', () => {
     })
 
     expect(email.subject).toBe("You're invited: Applied AI Foundations")
-    expect(email.html).toContain('src="cid:tai-skill-checker-logo"')
+    expect(email.html).toContain('src="https://app.taiskill.berl.dev/assets/logo-BivntQtA.png"')
     expect(email.html).toContain('TAI <span style="color:#666d78; font-weight:600;">Skill Checker</span>')
     expect(email.html).toContain('View assessment')
     expect(email.html).toContain('Applied AI Foundations')
     expect(email.text).toContain('https://example.com/invite/token')
     expect(email.text).toContain('Sep 24, 2026, 2:30 PM UTC')
-    expect(email.attachments).toEqual([expect.objectContaining({
-      filename: 'tai-skill-checker-logo.svg',
-      contentType: 'image/svg+xml',
-      contentId: 'tai-skill-checker-logo',
-    })])
+    expect(email).not.toHaveProperty('attachments')
   })
 
   it('renders the returning employee sign-in variant', () => {
