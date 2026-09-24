@@ -36,6 +36,34 @@ Backend for creating, assigning, and running realtime AI skill assessments.
    npm run build
    ```
 
+## Docker deployment
+
+Build one production image for both backend processes:
+
+```sh
+docker build -t tai-skill-checker-backend .
+```
+
+Run the HTTP API with the image's default command:
+
+```sh
+docker run --rm --env-file .env -p 3000:3000 tai-skill-checker-backend
+```
+
+Run the LiveKit worker from the same image by overriding the command:
+
+```sh
+docker run --rm --env-file .env tai-skill-checker-backend node dist/agent-worker.js start
+```
+
+For Dokploy, create two applications from this repository and Dockerfile. Give only the API application a domain and port `3000`. The worker needs no public domain or port. Configure its command as `node dist/agent-worker.js start` and allow at least 10 minutes for graceful shutdown so active calls can drain.
+
+Apply database migrations once per release, before starting the new API version:
+
+```sh
+docker run --rm --env-file .env tai-skill-checker-backend npm run db:migrate:prod
+```
+
 ## Administrator provisioning
 
 Set `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ORGANIZATION_NAME`, and `ORGANIZATION_SLUG` before starting the API. Startup idempotently creates the configured Better Auth user and ensures that user has the `ADMIN` membership in the single organization. Public password sign-up is disabled. `ADMIN_PASSWORD` is used only when the admin user is first created; changing it later does not reset an existing password.
