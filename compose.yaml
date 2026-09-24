@@ -1,0 +1,77 @@
+x-backend-environment: &backend-environment
+  NODE_ENV: production
+  PORT: 3000
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+  BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required}
+  BETTER_AUTH_URL: ${BETTER_AUTH_URL:?BETTER_AUTH_URL is required}
+  FRONTEND_URL: ${FRONTEND_URL:?FRONTEND_URL is required}
+  ADMIN_NAME: ${ADMIN_NAME:-Admin}
+  ADMIN_EMAIL: ${ADMIN_EMAIL:?ADMIN_EMAIL is required}
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD is required}
+  ORGANIZATION_NAME: ${ORGANIZATION_NAME:?ORGANIZATION_NAME is required}
+  ORGANIZATION_SLUG: ${ORGANIZATION_SLUG:?ORGANIZATION_SLUG is required}
+  MAGIC_LINK_TTL_MINUTES: ${MAGIC_LINK_TTL_MINUTES:-15}
+  GOOGLE_GENERATIVE_AI_API_KEY: ${GOOGLE_GENERATIVE_AI_API_KEY:-}
+  GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3-flash-preview}
+  GEMINI_LIVE_MODEL: ${GEMINI_LIVE_MODEL:-gemini-2.5-flash-native-audio-preview-12-2025}
+  GEMINI_EMBEDDING_MODEL: ${GEMINI_EMBEDDING_MODEL:-gemini-embedding-001}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+  ANTHROPIC_WORKSPACE_ID: ${ANTHROPIC_WORKSPACE_ID:-}
+  ANTHROPIC_WORKSPACE_HEADER: ${ANTHROPIC_WORKSPACE_HEADER:-anthropic-workspace-id}
+  ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-}
+  ANTHROPIC_EVALUATION_MODEL: ${ANTHROPIC_EVALUATION_MODEL:-}
+  RESEND_API_KEY: ${RESEND_API_KEY:-}
+  RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-}
+  INVITATION_TTL_HOURS: ${INVITATION_TTL_HOURS:-168}
+  UPLOAD_DIR: /app/uploads
+  MAX_PDF_BYTES: ${MAX_PDF_BYTES:-10485760}
+  MAX_ASSESSMENT_ATTEMPTS: ${MAX_ASSESSMENT_ATTEMPTS:-3}
+  LIVEKIT_URL: ${LIVEKIT_URL:?LIVEKIT_URL is required}
+  LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?LIVEKIT_API_KEY is required}
+  LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?LIVEKIT_API_SECRET is required}
+  LIVEKIT_AGENT_NAME: ${LIVEKIT_AGENT_NAME:-assessment-interviewer}
+  LIVEKIT_TOKEN_TTL_SECONDS: ${LIVEKIT_TOKEN_TTL_SECONDS:-300}
+  R2_ENDPOINT: ${R2_ENDPOINT:-}
+  R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
+  R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
+  R2_BUCKET_NAME: ${R2_BUCKET_NAME:-}
+
+x-backend-service: &backend-service
+  image: tai-skill-checker-backend:${IMAGE_TAG:-latest}
+  restart: unless-stopped
+  environment: *backend-environment
+
+services:
+  api:
+    <<: *backend-service
+    build:
+      context: .
+      dockerfile: Dockerfile
+    expose:
+      - "3000"
+    volumes:
+      - uploads:/app/uploads
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/health').then(response => { if (!response.ok) process.exit(1) }).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    stop_grace_period: 30s
+
+  worker:
+    <<: *backend-service
+    command:
+      - node
+      - dist/agent-worker.js
+      - start
+    stop_grace_period: 15m
+
+volumes:
+  uploads:

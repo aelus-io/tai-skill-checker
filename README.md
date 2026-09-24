@@ -57,7 +57,13 @@ Run the LiveKit worker from the same image by overriding the command:
 docker run --rm --env-file .env tai-skill-checker-backend node dist/agent-worker.js start
 ```
 
-For Dokploy, create two applications from this repository and Dockerfile. Give only the API application a domain and port `3000`. The worker needs no public domain or port. Configure its command as `node dist/agent-worker.js start` and allow at least 10 minutes for graceful shutdown so active calls can drain.
+For Dokploy, create one Docker Compose service from `compose.yaml`. Add the production environment variables in Dokploy, route the public API domain to the `api` service on port `3000`, and do not add a domain to `worker`. The worker has a 15-minute graceful shutdown window so active calls can drain. The named `uploads` volume preserves uploaded assessment resources across API container replacements.
+
+Validate the resolved deployment locally with environment values from `.env`:
+
+```sh
+docker compose --env-file .env config
+```
 
 Apply database migrations once per release, before starting the new API version:
 
