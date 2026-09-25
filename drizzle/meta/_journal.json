@@ -64,6 +64,13 @@
       "when": 1790353159154,
       "tag": "0008_new_sandman",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1790368323880,
+      "tag": "0009_assessment_cover_images",
+      "breakpoints": true
     }
   ]
 }

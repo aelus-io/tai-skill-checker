@@ -9,7 +9,7 @@ import type { AppConfig } from './config/index.js'
 import type { Database } from './db/index.js'
 import type { Auth } from './modules/auth/index.js'
 import type { EvaluationService } from './modules/evaluation/index.js'
-import { createAssessmentGenerator, createAssessmentService } from './modules/assessments/index.js'
+import { createAssessmentGenerator, createAssessmentService, createCoverImageService } from './modules/assessments/index.js'
 import { createInvitationService } from './modules/invitations/index.js'
 import { createAttemptService } from './modules/attempts/index.js'
 import { createAgentSettingsService } from './modules/agent-settings/index.js'
@@ -64,6 +64,7 @@ export function createApp(dependencies: { config: AppConfig; db: Database; auth:
   const livekit = createLiveKitService(db, config)
   const agentSettings = createAgentSettingsService(db)
   const recordings = createRecordingService(db, config)
+  const coverImages = createCoverImageService(db, config)
   app.post('/api/webhooks/livekit', express.text({ type: '*/*', limit: '1mb' }), async (request, response) => {
     const event = await livekit.receiveWebhook(request.body as string, request.headers.authorization)
     await livekit.applyRecordingWebhook(event)
@@ -101,10 +102,10 @@ export function createApp(dependencies: { config: AppConfig; db: Database; auth:
   })
 
   app.use('/api/invitations', createInvitationRouter(invitations, auth))
-  app.use('/api', requireAuth, createAttemptRouter({ attempts, livekit, recordings, evaluations }))
+  app.use('/api', requireAuth, createAttemptRouter({ attempts, livekit, recordings, evaluations, coverImages }))
   app.use('/api/admin/evaluations', requireAuth, createEvaluationRouter(evaluations))
   app.use('/api/admin/agent-settings', requireAuth, createAgentSettingsRouter({ settings: agentSettings, livekit }))
-  app.use('/api/assessments', requireAuth, requireRole('ADMIN'), createAssessmentRouter({ assessments, resources, generator, invitations, config }))
+  app.use('/api/assessments', requireAuth, requireRole('ADMIN'), createAssessmentRouter({ assessments, resources, generator, invitations, coverImages, config }))
 
   app.use(notFoundHandler)
   app.use(createErrorHandler(logger))

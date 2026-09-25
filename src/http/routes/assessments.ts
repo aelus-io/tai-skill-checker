@@ -2,7 +2,7 @@ import { Router } from 'express'
 import multer from 'multer'
 import { z } from 'zod'
 import type { AppConfig } from '../../config/index.js'
-import type { AssessmentGenerator, AssessmentService } from '../../modules/assessments/index.js'
+import type { AssessmentGenerator, AssessmentService, CoverImageService } from '../../modules/assessments/index.js'
 import { rubricCriteriaSchema } from '../../modules/assessments/index.js'
 import type { InvitationService } from '../../modules/invitations/index.js'
 import type { ResourceService } from '../../modules/resources/index.js'
@@ -38,10 +38,12 @@ export function createAssessmentRouter(dependencies: {
   generator: AssessmentGenerator
   invitations: InvitationService
   resources: ResourceService
-  config: Pick<AppConfig, 'maxPdfBytes'>
+  coverImages: CoverImageService
+  config: Pick<AppConfig, 'maxPdfBytes' | 'maxCoverImageBytes'>
 }) {
   const router = Router()
   const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: dependencies.config.maxPdfBytes, files: 1 } })
+  const coverUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: dependencies.config.maxCoverImageBytes, files: 1 } })
 
   router.get('/', async (request, response) => {
     const auth = getAuthContext(request)
@@ -65,6 +67,28 @@ export function createAssessmentRouter(dependencies: {
     const auth = getAuthContext(request)
     const assessmentId = idSchema.parse(request.params.assessmentId)
     response.send({ data: await dependencies.assessments.update({ ...auth, assessmentId, ...assessmentBody.parse(request.body) }) })
+  })
+
+  router.get('/:assessmentId/cover', async (request, response) => {
+    const auth = getAuthContext(request)
+    const assessmentId = idSchema.parse(request.params.assessmentId)
+    const image = await dependencies.coverImages.readForAdmin({ organizationId: auth.organizationId, assessmentId })
+    response.setHeader('Cache-Control', 'private, max-age=31536000, immutable')
+    response.setHeader('X-Content-Type-Options', 'nosniff')
+    response.type(image.mimeType).send(image.bytes)
+  })
+
+  router.put('/:assessmentId/cover', coverUpload.single('file'), async (request, response) => {
+    const auth = getAuthContext(request)
+    const assessmentId = idSchema.parse(request.params.assessmentId)
+    if (!request.file) throw new AppError('INVALID_UPLOAD', 'An image file is required', 400)
+    response.send({ data: await dependencies.coverImages.setCover({ organizationId: auth.organizationId, assessmentId, bytes: request.file.buffer }) })
+  })
+
+  router.delete('/:assessmentId/cover', async (request, response) => {
+    const auth = getAuthContext(request)
+    const assessmentId = idSchema.parse(request.params.assessmentId)
+    response.send({ data: await dependencies.coverImages.removeCover({ organizationId: auth.organizationId, assessmentId }) })
   })
 
   router.get('/:assessmentId/versions/:versionId', async (request, response) => {

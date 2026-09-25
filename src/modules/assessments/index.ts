@@ -5,3 +5,5 @@ export type { GeneratedAssessmentContent, RubricCriteria } from './types/index.j
 export { createAssessmentGenerator } from './components/generator.js'
 export type { AssessmentGenerator } from './components/generator.js'
 export { validateDraftForPublication } from './components/publication.js'
+export { coverImageUrl, createCoverImageService, detectCoverImageType } from './components/cover-images.js'
+export type { CoverImageService } from './components/cover-images.js'

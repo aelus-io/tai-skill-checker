@@ -19,7 +19,7 @@ describe('evaluation authorization', () => {
     const app = express()
     app.use((req, _res, next) => { req.authContext = { userId: 'employee', email: 'employee@example.com', organizationId: '00000000-0000-4000-8000-000000000001', role: 'EMPLOYEE' }; next() })
     app.use('/api/admin/evaluations', createEvaluationRouter(evaluations))
-    app.use('/api', createAttemptRouter({ attempts: { inspect: vi.fn() } as unknown as AttemptService, livekit: {} as LiveKitService, recordings: {} as RecordingService, evaluations }))
+    app.use('/api', createAttemptRouter({ attempts: { inspect: vi.fn() } as unknown as AttemptService, livekit: {} as LiveKitService, recordings: {} as RecordingService, evaluations, coverImages: { readForEmployee: vi.fn() } }))
     app.use(createErrorHandler({ error: vi.fn() } as unknown as Logger))
 
     await request(app).get('/api/admin/evaluations').expect(403)

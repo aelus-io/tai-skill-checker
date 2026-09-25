@@ -1,6 +1,7 @@
 import { and, asc, count, desc, eq, gt, inArray, isNull, max } from 'drizzle-orm'
 import type { Database } from '../../../db/index.js'
-import { assignments, attempts, attemptEvents, attemptScenarios, attemptTurns, assessmentVersions, competencies, evaluations, scenarios, users } from '../../../db/schema.js'
+import { coverImageUrl } from '../../assessments/index.js'
+import { assessments, assignments, attempts, attemptEvents, attemptScenarios, attemptTurns, assessmentVersions, competencies, evaluations, scenarios, users } from '../../../db/schema.js'
 import { ConflictError, ForbiddenError, NotFoundError } from '../../../http/errors.js'
 import { assertAttemptAvailable, canTransitionAttempt, nextAttemptNumber, remainingAttempts } from './state-machine.js'
 import type { AttemptSpeaker, AttemptStatus, StartedAttempt } from '../types/index.js'
@@ -13,6 +14,7 @@ type EmployeeAssignmentRow = {
   assessmentId: string
   name: string
   description: string
+  coverImageKey?: string | null
   attemptsResetAt: Date | null
   updatedAt: Date
 }
@@ -35,6 +37,7 @@ export function summarizeEmployeeAssignment(row: EmployeeAssignmentRow, history:
     assessmentId: row.assessmentId,
     name: row.name,
     description: row.description,
+    coverImageUrl: coverImageUrl(`/api/assignments/${row.assignmentId}/cover`, row.coverImageKey ?? null),
     updatedAt: row.updatedAt,
     attemptsUsed: currentAttempts.length,
     attemptsRemaining: remainingAttempts(currentAttempts.length, maxAttempts),
@@ -51,12 +54,13 @@ export function createAttemptService(db: Database, maxAttempts: number) {
       assessmentId: assignments.assessmentId,
       name: assessmentVersions.name,
       description: assessmentVersions.description,
+      coverImageKey: assessments.coverImageKey,
       attemptsResetAt: assignments.attemptsResetAt,
       updatedAt: assignments.updatedAt,
     }).from(assignments).innerJoin(
       assessmentVersions,
       eq(assignments.assessmentVersionId, assessmentVersions.id),
-    ).where(and(
+    ).innerJoin(assessments, eq(assignments.assessmentId, assessments.id)).where(and(
       eq(assignments.organizationId, input.organizationId),
       eq(assignments.employeeUserId, input.userId),
     )).orderBy(desc(assignments.updatedAt))
@@ -78,7 +82,8 @@ export function createAttemptService(db: Database, maxAttempts: number) {
       assignmentId: assignments.id, status: assignments.status, assessmentId: assignments.assessmentId,
       assessmentVersionId: assignments.assessmentVersionId, attemptsResetAt: assignments.attemptsResetAt, name: assessmentVersions.name,
       description: assessmentVersions.description, preparationInstructions: assessmentVersions.preparationInstructions,
-    }).from(assignments).innerJoin(assessmentVersions, eq(assignments.assessmentVersionId, assessmentVersions.id)).where(and(
+      coverImageKey: assessments.coverImageKey,
+    }).from(assignments).innerJoin(assessmentVersions, eq(assignments.assessmentVersionId, assessmentVersions.id)).innerJoin(assessments, eq(assignments.assessmentId, assessments.id)).where(and(
       eq(assignments.id, input.assignmentId), eq(assignments.organizationId, input.organizationId), eq(assignments.employeeUserId, input.userId),
     )).limit(1)
     if (!row) throw new NotFoundError('Assignment')
@@ -94,8 +99,8 @@ export function createAttemptService(db: Database, maxAttempts: number) {
       )).orderBy(asc(competencies.position)),
     ])
     const used = usage?.used ?? 0
-    const { attemptsResetAt: _attemptsResetAt, ...preparation } = row
-    return { ...preparation, competencies: visibleCompetencies, attemptsUsed: used, attemptsRemaining: remainingAttempts(used, maxAttempts) }
+    const { attemptsResetAt: _attemptsResetAt, coverImageKey, ...preparation } = row
+    return { ...preparation, coverImageUrl: coverImageUrl(`/api/assignments/${row.assignmentId}/cover`, coverImageKey), competencies: visibleCompetencies, attemptsUsed: used, attemptsRemaining: remainingAttempts(used, maxAttempts) }
   }
 
   async function start(input: { organizationId: string; assignmentId: string; userId: string }): Promise<StartedAttempt> {

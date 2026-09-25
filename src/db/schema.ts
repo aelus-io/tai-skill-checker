@@ -116,6 +116,7 @@ export const assessments = pgTable('assessments', {
   name: text('name').notNull(),
   description: text('description').notNull(),
   preparationInstructions: text('preparation_instructions').notNull().default(''),
+  coverImageKey: text('cover_image_key'),
   status: assessmentStatusEnum('status').notNull().default('DRAFT'),
   latestVersionNumber: integer('latest_version_number').notNull().default(0),
   currentPublishedVersionId: uuid('current_published_version_id').references((): AnyPgColumn => assessmentVersions.id, { onDelete: 'set null' }),

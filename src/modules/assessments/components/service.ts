@@ -12,6 +12,7 @@ import {
 } from '../../../db/schema.js'
 import { ConflictError, NotFoundError } from '../../../http/errors.js'
 import type { GeneratedAssessmentContent, RubricCriteria } from '../types/index.js'
+import { withCoverImageUrl } from './cover-images.js'
 import { validateDraftForPublication } from './publication.js'
 
 type Scope = { organizationId: string; userId: string }
@@ -35,7 +36,7 @@ export function createAssessmentService(db: Database) {
       preparationInstructions: input.preparationInstructions,
     }).returning()
     if (!assessment) throw new Error('Assessment insert did not return a row')
-    return assessment
+    return withCoverImageUrl(assessment)
   }
 
   async function update(input: Scope & { assessmentId: string; name: string; description: string; preparationInstructions: string }) {
@@ -50,13 +51,14 @@ export function createAssessmentService(db: Database) {
       inArray(assessments.status, ['DRAFT', 'PUBLISHED']),
     )).returning()
     if (!assessment) throw new NotFoundError('Editable assessment')
-    return assessment
+    return withCoverImageUrl(assessment)
   }
 
   async function list(organizationId: string) {
-    return db.select().from(assessments)
+    const rows = await db.select().from(assessments)
       .where(eq(assessments.organizationId, organizationId))
       .orderBy(asc(assessments.createdAt))
+    return rows.map(withCoverImageUrl)
   }
 
   async function get(organizationId: string, assessmentId: string) {
@@ -69,7 +71,7 @@ export function createAssessmentService(db: Database) {
       db.select({ id: resources.id, filename: resources.filename, mimeType: resources.mimeType, byteSize: resources.byteSize, status: resources.status, createdAt: resources.createdAt }).from(resources).where(and(eq(resources.organizationId, organizationId), eq(resources.assessmentId, assessmentId), isNull(resources.assessmentVersionId))),
       db.select().from(assessmentVersions).where(and(eq(assessmentVersions.organizationId, organizationId), eq(assessmentVersions.assessmentId, assessmentId))).orderBy(asc(assessmentVersions.versionNumber)),
     ])
-    return { ...assessment, scenarios: draftScenarios, competencies: draftCompetencies, rubrics: draftRubrics, scenarioCompetencies: mappings, resources: attachedResources, versions }
+    return { ...withCoverImageUrl(assessment), scenarios: draftScenarios, competencies: draftCompetencies, rubrics: draftRubrics, scenarioCompetencies: mappings, resources: attachedResources, versions }
   }
 
   async function getVersion(organizationId: string, assessmentId: string, versionId: string) {

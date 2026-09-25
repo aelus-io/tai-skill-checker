@@ -1,12 +1,13 @@
 import { Router } from 'express'
 import { z } from 'zod'
+import type { CoverImageService } from '../../modules/assessments/index.js'
 import type { AttemptService } from '../../modules/attempts/index.js'
 import type { LiveKitService } from '../../modules/livekit/index.js'
 import type { RecordingService } from '../../modules/recordings/index.js'
 import type { EvaluationService } from '../../modules/evaluation/index.js'
 import { getAuthContext, requireRole } from '../middleware/auth.js'
 
-export function createAttemptRouter(dependencies: { attempts: AttemptService; livekit: LiveKitService; recordings: RecordingService; evaluations: Pick<EvaluationService, 'getForAttempt'> }) {
+export function createAttemptRouter(dependencies: { attempts: AttemptService; livekit: LiveKitService; recordings: RecordingService; evaluations: Pick<EvaluationService, 'getForAttempt'>; coverImages: Pick<CoverImageService, 'readForEmployee'> }) {
   const router = Router()
   router.get('/assignments', requireRole('EMPLOYEE'), async (request, response) => {
     const auth = getAuthContext(request)
@@ -15,6 +16,13 @@ export function createAttemptRouter(dependencies: { attempts: AttemptService; li
   router.get('/assignments/:assignmentId/preparation', requireRole('EMPLOYEE'), async (request, response) => {
     const auth = getAuthContext(request); const params = z.object({ assignmentId: z.uuid() }).parse(request.params)
     response.send({ data: await dependencies.attempts.prepare({ organizationId: auth.organizationId, userId: auth.userId, assignmentId: params.assignmentId }) })
+  })
+  router.get('/assignments/:assignmentId/cover', requireRole('EMPLOYEE'), async (request, response) => {
+    const auth = getAuthContext(request); const params = z.object({ assignmentId: z.uuid() }).parse(request.params)
+    const image = await dependencies.coverImages.readForEmployee({ organizationId: auth.organizationId, userId: auth.userId, assignmentId: params.assignmentId })
+    response.setHeader('Cache-Control', 'private, max-age=31536000, immutable')
+    response.setHeader('X-Content-Type-Options', 'nosniff')
+    response.type(image.mimeType).send(image.bytes)
   })
   router.post('/assignments/:assignmentId/attempts', requireRole('EMPLOYEE'), async (request, response) => {
     const auth = getAuthContext(request); const params = z.object({ assignmentId: z.uuid() }).parse(request.params)

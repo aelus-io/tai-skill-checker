@@ -25,6 +25,7 @@ describe('employee attempt abandonment', () => {
       livekit: { closeRooms } as unknown as LiveKitService,
       recordings: {} as RecordingService,
       evaluations: { getForAttempt: vi.fn() },
+      coverImages: { readForEmployee: vi.fn() },
     }))
 
     const response = await request(app)

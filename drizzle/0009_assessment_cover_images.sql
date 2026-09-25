@@ -1,0 +1,1 @@
+ALTER TABLE "assessments" ADD COLUMN "cover_image_key" text;

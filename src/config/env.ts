@@ -35,6 +35,7 @@ const EnvSchema = z.object({
   INVITATION_TTL_HOURS: z.coerce.number().int().positive().default(168),
   UPLOAD_DIR: z.string().min(1).default('./uploads'),
   MAX_PDF_BYTES: z.coerce.number().int().positive().default(10 * 1024 * 1024),
+  MAX_COVER_IMAGE_BYTES: z.coerce.number().int().positive().default(5 * 1024 * 1024),
   MAX_ASSESSMENT_ATTEMPTS: z.coerce.number().int().positive().default(3),
   LIVEKIT_URL: optional(z.url()),
   LIVEKIT_API_KEY: optional(z.string().min(1)),
@@ -83,6 +84,7 @@ export type AppConfig = {
   invitationTtlHours: number
   uploadDir: string
   maxPdfBytes: number
+  maxCoverImageBytes: number
   maxAssessmentAttempts: number
   livekitUrl?: string
   livekitApiKey?: string
@@ -126,6 +128,7 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
     invitationTtlHours: env.INVITATION_TTL_HOURS,
     uploadDir: resolve(env.UPLOAD_DIR),
     maxPdfBytes: env.MAX_PDF_BYTES,
+    maxCoverImageBytes: env.MAX_COVER_IMAGE_BYTES,
     maxAssessmentAttempts: env.MAX_ASSESSMENT_ATTEMPTS,
     ...(env.LIVEKIT_URL ? { livekitUrl: env.LIVEKIT_URL } : {}),
     ...(env.LIVEKIT_API_KEY ? { livekitApiKey: env.LIVEKIT_API_KEY } : {}),
