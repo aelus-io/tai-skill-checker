@@ -1,6 +1,6 @@
 import { EgressStatus, ParticipantInfo_Kind } from '@livekit/protocol'
 import { describe, expect, it, vi } from 'vitest'
-import { waitForRealtimeInfrastructure } from '../index.js'
+import { waitForAgentParticipant, waitForRealtimeInfrastructure } from '../index.js'
 
 describe('LiveKit session provisioning', () => {
   it('waits until the agent joins and recording startup is accepted', async () => {
@@ -55,5 +55,20 @@ describe('LiveKit session provisioning', () => {
       timeoutMs: 1,
       pollIntervalMs: 1,
     })).rejects.toThrow('startup timeout')
+  })
+
+  it('waits for the agent before returning an admin test-room token', async () => {
+    const listParticipants = vi.fn().mockResolvedValueOnce([]).mockResolvedValue([{ kind: ParticipantInfo_Kind.AGENT }])
+    await expect(waitForAgentParticipant({ roomName: 'agent-test-1', roomClient: { listParticipants }, timeoutMs: 100, pollIntervalMs: 0 })).resolves.toBeUndefined()
+    expect(listParticipants).toHaveBeenCalledTimes(2)
+  })
+
+  it('returns a useful configuration error when the test worker never joins', async () => {
+    await expect(waitForAgentParticipant({
+      roomName: 'agent-test-1',
+      roomClient: { listParticipants: vi.fn().mockResolvedValue([]) },
+      timeoutMs: 1,
+      pollIntervalMs: 1,
+    })).rejects.toMatchObject({ code: 'AGENT_NOT_READY', status: 503 })
   })
 })

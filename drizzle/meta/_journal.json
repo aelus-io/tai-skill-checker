@@ -57,6 +57,13 @@
       "when": 1790272679333,
       "tag": "0007_slim_wiccan",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790353159154,
+      "tag": "0008_new_sandman",
+      "breakpoints": true
     }
   ]
 }

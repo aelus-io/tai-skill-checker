@@ -96,6 +96,20 @@ export const organizationMemberships = pgTable('organization_memberships', {
   index('organization_memberships_user_idx').on(table.userId),
 ])
 
+export const organizationAgentSettings = pgTable('organization_agent_settings', {
+  id: id(),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
+  systemPrompt: text('system_prompt').notNull(),
+  welcomeMessage: text('welcome_message').notNull(),
+  closingMessage: text('closing_message').notNull(),
+  voice: text('voice').notNull(),
+  temperature: real('temperature').notNull(),
+  topP: real('top_p').notNull(),
+  maxOutputTokens: integer('max_output_tokens').notNull(),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (table) => [uniqueIndex('organization_agent_settings_org_uidx').on(table.organizationId)])
+
 export const assessments = pgTable('assessments', {
   id: id(),
   organizationId: uuid('organization_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),

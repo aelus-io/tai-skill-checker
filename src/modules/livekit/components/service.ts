@@ -1,10 +1,11 @@
 import { and, eq } from 'drizzle-orm'
+import { randomUUID } from 'node:crypto'
 import { EgressStatus, ParticipantInfo_Kind } from '@livekit/protocol'
 import { AccessToken, AgentDispatchClient, EgressClient, EncodedFileOutput, EncodedFileType, RoomServiceClient, S3Upload, WebhookReceiver, type WebhookEvent } from 'livekit-server-sdk'
 import type { AppConfig } from '../../../config/index.js'
 import type { Database } from '../../../db/index.js'
 import { attempts, recordings } from '../../../db/schema.js'
-import { ConfigurationError, ConflictError, NotFoundError } from '../../../http/errors.js'
+import { AppError, ConfigurationError, ConflictError, NotFoundError } from '../../../http/errors.js'
 import type { StartedAttempt } from '../../attempts/index.js'
 
 type LiveKitConfig = Pick<AppConfig, 'livekitUrl' | 'livekitApiKey' | 'livekitApiSecret' | 'livekitAgentName' | 'livekitTokenTtlSeconds' | 'r2Endpoint' | 'r2AccessKeyId' | 'r2SecretAccessKey' | 'r2BucketName'>
@@ -45,6 +46,23 @@ export async function waitForRealtimeInfrastructure(input: {
   }
 
   throw new Error('LiveKit agent or recording did not become ready before the session startup timeout')
+}
+
+export async function waitForAgentParticipant(input: {
+  roomName: string
+  roomClient: Pick<RoomServiceClient, 'listParticipants'>
+  timeoutMs?: number
+  pollIntervalMs?: number
+}) {
+  const timeoutMs = input.timeoutMs ?? provisioningTimeoutMs
+  const pollIntervalMs = input.pollIntervalMs ?? provisioningPollIntervalMs
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() <= deadline) {
+    const participants = await input.roomClient.listParticipants(input.roomName)
+    if (participants.some((participant) => participant.kind === ParticipantInfo_Kind.AGENT)) return
+    await pause(pollIntervalMs)
+  }
+  throw new AppError('AGENT_NOT_READY', 'The voice agent worker did not join the test room. Verify that the API and agent worker use the same unique LIVEKIT_AGENT_NAME.', 503)
 }
 
 export async function createParticipantToken(input: { apiKey: string; apiSecret: string; ttlSeconds: number; roomName: string; identity: string; metadata: Record<string, string>; observer: boolean }) {
@@ -100,6 +118,28 @@ export function createLiveKitService(db: Database, config: LiveKitConfig) {
     return { url: livekit.participantUrl, token: await token(attempt.roomName, `observer-${input.adminUserId}-${Date.now()}`, { role: 'observer', attemptId: attempt.id }, true) }
   }
 
+  async function createAgentTestSession(input: { organizationId: string; adminUserId: string }) {
+    const livekit = requireConfig()
+    const roomName = `agent-test-${input.organizationId}-${randomUUID()}`
+    const roomClient = new RoomServiceClient(livekit.url, livekit.key, livekit.secret)
+    const dispatchClient = new AgentDispatchClient(livekit.url, livekit.key, livekit.secret)
+    await roomClient.createRoom({ name: roomName, emptyTimeout: 60, departureTimeout: 10, maxParticipants: 2 })
+    try {
+      await dispatchClient.createDispatch(roomName, config.livekitAgentName, { metadata: JSON.stringify({ mode: 'test', organizationId: input.organizationId }) })
+      await waitForAgentParticipant({ roomName, roomClient })
+      return { roomName, url: livekit.participantUrl, token: await token(roomName, `admin-test-${input.adminUserId}-${Date.now()}`, { role: 'admin-test' }, false) }
+    } catch (error) {
+      await roomClient.deleteRoom(roomName).catch(() => undefined)
+      throw error
+    }
+  }
+
+  async function closeAgentTestSession(input: { organizationId: string; roomName: string }) {
+    const expectedPrefix = `agent-test-${input.organizationId}-`
+    if (!input.roomName.startsWith(expectedPrefix)) throw new NotFoundError('Agent test session')
+    await closeRooms([input.roomName])
+  }
+
   async function closeRooms(roomNames: string[]) {
     if (!roomNames.length) return
     const livekit = requireConfig()
@@ -127,6 +167,6 @@ export function createLiveKitService(db: Database, config: LiveKitConfig) {
     }
   }
 
-  return { provision, observerToken, closeRooms, receiveWebhook, applyRecordingWebhook }
+  return { provision, observerToken, createAgentTestSession, closeAgentTestSession, closeRooms, receiveWebhook, applyRecordingWebhook }
 }
 export type LiveKitService = ReturnType<typeof createLiveKitService>

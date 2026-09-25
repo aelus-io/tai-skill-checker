@@ -12,6 +12,7 @@ import type { EvaluationService } from './modules/evaluation/index.js'
 import { createAssessmentGenerator, createAssessmentService } from './modules/assessments/index.js'
 import { createInvitationService } from './modules/invitations/index.js'
 import { createAttemptService } from './modules/attempts/index.js'
+import { createAgentSettingsService } from './modules/agent-settings/index.js'
 import { createLiveKitService } from './modules/livekit/index.js'
 import { createRecordingService } from './modules/recordings/index.js'
 import { createResourceService } from './modules/resources/index.js'
@@ -22,6 +23,7 @@ import { createAssessmentRouter } from './http/routes/assessments.js'
 import { createInvitationRouter } from './http/routes/invitations.js'
 import { createAttemptRouter } from './http/routes/attempts.js'
 import { createEvaluationRouter } from './http/routes/evaluations.js'
+import { createAgentSettingsRouter } from './http/routes/agent-settings.js'
 
 export function createApp(dependencies: { config: AppConfig; db: Database; auth: Auth; logger: Logger; evaluations: EvaluationService }) {
   const { config, db, auth, logger, evaluations } = dependencies
@@ -60,6 +62,7 @@ export function createApp(dependencies: { config: AppConfig; db: Database; auth:
   app.all('/api/auth/*splat', toNodeHandler(auth))
   const attempts = createAttemptService(db, config.maxAssessmentAttempts)
   const livekit = createLiveKitService(db, config)
+  const agentSettings = createAgentSettingsService(db)
   const recordings = createRecordingService(db, config)
   app.post('/api/webhooks/livekit', express.text({ type: '*/*', limit: '1mb' }), async (request, response) => {
     const event = await livekit.receiveWebhook(request.body as string, request.headers.authorization)
@@ -100,6 +103,7 @@ export function createApp(dependencies: { config: AppConfig; db: Database; auth:
   app.use('/api/invitations', createInvitationRouter(invitations, auth))
   app.use('/api', requireAuth, createAttemptRouter({ attempts, livekit, recordings, evaluations }))
   app.use('/api/admin/evaluations', requireAuth, createEvaluationRouter(evaluations))
+  app.use('/api/admin/agent-settings', requireAuth, createAgentSettingsRouter({ settings: agentSettings, livekit }))
   app.use('/api/assessments', requireAuth, requireRole('ADMIN'), createAssessmentRouter({ assessments, resources, generator, invitations, config }))
 
   app.use(notFoundHandler)

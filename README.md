@@ -37,6 +37,8 @@ Backend for creating, assigning, and running realtime AI skill assessments.
    npm run build
    ```
 
+   Use a unique `LIVEKIT_AGENT_NAME` for local development (for example, `assessment-interviewer-your-name-local`). LiveKit dispatches by this name, so reusing a deployed or another developer's name can send local test jobs to the wrong worker. Restart both the API and agent worker after changing it.
+
 ## Docker deployment
 
 Build one production image for both backend processes:

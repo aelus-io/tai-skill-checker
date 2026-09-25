@@ -1,2 +1,2 @@
 export { createAssessmentTools } from './components/tools.js'
-export { createInterviewerAgent } from './components/interviewer.js'
+export { createAgentPreview, createInterviewerAgent } from './components/interviewer.js'
