@@ -126,6 +126,8 @@ Run the API and agent worker as separate processes. Starting an attempt creates 
 
 The API process also runs the database-backed evaluation worker. It atomically claims queued rows, recovers claims older than ten minutes after a crash, and validates all Anthropic output against the exact published version and employee transcript turns. Valid results and the `PROCESSING -> COMPLETED` attempt transition commit together. Invalid output, missing configuration, and provider failures leave the transcript intact and create a sanitized `FAILED` evaluation that an admin can retry. Manually ended or disconnected attempts never enter this queue.
 
+The API also runs an orphan-session reaper once per minute. After `LIVEKIT_INACTIVITY_TIMEOUT_SECONDS` and the employee token lifetime have both elapsed, it checks stale `IN_PROGRESS` attempts against LiveKit. Rooms without the expected employee participant are marked `ABANDONED` and deleted; connected employees are never reaped. The agent independently applies the same inactivity setting to connected sessions with no speech.
+
 ## Domain guarantees
 
 - `organizationId` is derived from the authenticated membership and never accepted from API bodies.

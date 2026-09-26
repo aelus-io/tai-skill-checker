@@ -27,6 +27,12 @@ function dependencies() {
   return { attempts, resources, getContext }
 }
 
+const toolContext = () => ({
+  toolCallId: 'call-1',
+  abortSignal: new AbortController().signal,
+  ctx: { disallowInterruptions: vi.fn() },
+}) as never
+
 const sessions: AgentSession[] = []
 afterEach(async () => { await Promise.all(sessions.splice(0).map((session) => session.close())) })
 
@@ -60,7 +66,7 @@ describe('assessment interviewer agent', () => {
   it('keeps tenant and attempt identifiers out of model controlled retrieval arguments', async () => {
     const deps = dependencies()
     const tools = createAssessmentTools(trusted, deps.attempts, deps.resources, () => undefined)
-    await tools.retrieveResource.execute({ query: 'privacy policy' }, { toolCallId: 'call-1', abortSignal: new AbortController().signal } as never)
+    await tools.retrieveResource.execute({ query: 'privacy policy' }, toolContext())
     expect(deps.resources.retrieve).toHaveBeenCalledWith({ organizationId: trusted.organizationId, assessmentId: trusted.assessmentId, assessmentVersionId: trusted.assessmentVersionId, query: 'privacy policy' })
   })
 
@@ -68,13 +74,13 @@ describe('assessment interviewer agent', () => {
     const deps = dependencies()
     const tools = createAssessmentTools(trusted, deps.attempts, deps.resources, () => undefined)
 
-    const result = await tools.completeAssessment.execute({}, { toolCallId: 'call-1', abortSignal: new AbortController().signal } as never)
+    const result = await tools.completeAssessment.execute({}, toolContext())
 
     expect(result).toMatchObject({ status: 'SCENARIOS_INCOMPLETE', currentScenario: { id: 'scenario-2' } })
     expect(deps.attempts.completeAssessment).not.toHaveBeenCalled()
   })
 
-  it('serializes scenario and assessment completion tool calls', async () => {
+  it('automatically completes the assessment after the final scenario', async () => {
     const deps = dependencies()
     let currentScenarioId: string | null = 'scenario-2'
     deps.attempts.completeScenario = vi.fn().mockImplementation(async () => {
@@ -90,11 +96,9 @@ describe('assessment interviewer agent', () => {
     const onComplete = vi.fn()
     const tools = createAssessmentTools(trusted, deps.attempts, deps.resources, onComplete)
 
-    const scenarioCompletion = tools.completeScenario.execute({}, { toolCallId: 'call-1', abortSignal: new AbortController().signal } as never)
-    const assessmentCompletion = tools.completeAssessment.execute({}, { toolCallId: 'call-2', abortSignal: new AbortController().signal } as never)
-    const [, assessmentResult] = await Promise.all([scenarioCompletion, assessmentCompletion])
+    const result = await tools.completeScenario.execute({}, toolContext())
 
-    expect(assessmentResult).toEqual({ status: 'PROCESSING' })
+    expect(result).toMatchObject({ nextScenario: null, assessmentStatus: 'PROCESSING' })
     expect(deps.attempts.completeAssessment).toHaveBeenCalledWith({ organizationId: 'org-1', attemptId: 'attempt-1' })
     expect(onComplete).toHaveBeenCalledOnce()
   })

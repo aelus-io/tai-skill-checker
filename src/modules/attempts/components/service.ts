@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gt, inArray, isNull, max } from 'drizzle-orm'
+import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, lt, max } from 'drizzle-orm'
 import type { Database } from '../../../db/index.js'
 import { coverImageUrl } from '../../assessments/index.js'
 import { assessments, assignments, attempts, attemptEvents, attemptScenarios, attemptTurns, assessmentVersions, competencies, evaluations, scenarios, users } from '../../../db/schema.js'
@@ -52,7 +52,7 @@ export function createAttemptService(db: Database, maxAttempts: number) {
       assignmentId: assignments.id,
       status: assignments.status,
       assessmentId: assignments.assessmentId,
-      name: assessmentVersions.name,
+      name: assessments.name,
       description: assessmentVersions.description,
       coverImageKey: assessments.coverImageKey,
       attemptsResetAt: assignments.attemptsResetAt,
@@ -80,7 +80,7 @@ export function createAttemptService(db: Database, maxAttempts: number) {
   async function prepare(input: { organizationId: string; assignmentId: string; userId: string }) {
     const [row] = await db.select({
       assignmentId: assignments.id, status: assignments.status, assessmentId: assignments.assessmentId,
-      assessmentVersionId: assignments.assessmentVersionId, attemptsResetAt: assignments.attemptsResetAt, name: assessmentVersions.name,
+      assessmentVersionId: assignments.assessmentVersionId, attemptsResetAt: assignments.attemptsResetAt, name: assessments.name,
       description: assessmentVersions.description, preparationInstructions: assessmentVersions.preparationInstructions,
       coverImageKey: assessments.coverImageKey,
     }).from(assignments).innerJoin(assessmentVersions, eq(assignments.assessmentVersionId, assessmentVersions.id)).innerJoin(assessments, eq(assignments.assessmentId, assessments.id)).where(and(
@@ -235,13 +235,34 @@ export function createAttemptService(db: Database, maxAttempts: number) {
   async function getContext(organizationId: string, attemptId: string) {
     const [attempt] = await db.select().from(attempts).where(and(eq(attempts.id, attemptId), eq(attempts.organizationId, organizationId))).limit(1)
     if (!attempt) throw new NotFoundError('Attempt')
-    const version = await db.select().from(assessmentVersions).where(and(eq(assessmentVersions.id, attempt.assessmentVersionId), eq(assessmentVersions.organizationId, organizationId))).limit(1)
+    const [assessment] = await db.select({
+      version: assessmentVersions,
+      currentName: assessments.name,
+    }).from(assessmentVersions).innerJoin(assessments, and(
+      eq(assessments.id, assessmentVersions.assessmentId),
+      eq(assessments.organizationId, assessmentVersions.organizationId),
+    )).where(and(eq(assessmentVersions.id, attempt.assessmentVersionId), eq(assessmentVersions.organizationId, organizationId))).limit(1)
+    if (!assessment) throw new NotFoundError('Assessment version')
     const ordered = await db.select().from(scenarios).where(and(eq(scenarios.assessmentVersionId, attempt.assessmentVersionId), eq(scenarios.organizationId, organizationId))).orderBy(asc(scenarios.position))
-    return { attempt, assessment: version[0]!, scenarios: ordered }
+    return { attempt, assessment: { ...assessment.version, name: assessment.currentName }, scenarios: ordered }
   }
 
   async function inspectActive(organizationId: string) {
     return db.select({ attemptId: attempts.id, status: attempts.status, roomName: attempts.roomName, currentScenarioId: attempts.currentScenarioId, lastHeartbeatAt: attempts.lastHeartbeatAt, employeeUserId: attempts.employeeUserId, employeeName: users.name, employeeEmail: users.email, assessmentId: attempts.assessmentId }).from(attempts).innerJoin(users, eq(attempts.employeeUserId, users.id)).where(and(eq(attempts.organizationId, organizationId), inArray(attempts.status, ['IN_PROGRESS', 'PROCESSING']))).orderBy(asc(attempts.startedAt))
+  }
+
+  async function findStaleSessions(before: Date) {
+    return db.select({
+      attemptId: attempts.id,
+      organizationId: attempts.organizationId,
+      roomName: attempts.roomName,
+      employeeUserId: attempts.employeeUserId,
+    }).from(attempts).where(and(
+      eq(attempts.status, 'IN_PROGRESS'),
+      isNotNull(attempts.roomName),
+      isNotNull(attempts.startedAt),
+      lt(attempts.startedAt, before),
+    )) as Promise<Array<{ attemptId: string; organizationId: string; roomName: string; employeeUserId: string }>>
   }
 
   async function inspect(organizationId: string, attemptId: string) {
@@ -260,7 +281,7 @@ export function createAttemptService(db: Database, maxAttempts: number) {
     await transition({ organizationId: attempt.organizationId, attemptId: attempt.id, to: 'ABANDONED', eventType: 'SESSION_DISCONNECTED', idempotencyKey: eventId })
   }
 
-  return { listForEmployee, prepare, start, failStart, transition, appendTurn, recordEvent, completeScenario, completeAssessment, abandonByEmployee, getContext, inspectActive, inspect, abandonByRoom }
+  return { listForEmployee, prepare, start, failStart, transition, appendTurn, recordEvent, completeScenario, completeAssessment, abandonByEmployee, getContext, inspectActive, findStaleSessions, inspect, abandonByRoom }
 }
 
 function inArrayValue<T>(value: T, choices: readonly T[]): boolean { return choices.includes(value) }

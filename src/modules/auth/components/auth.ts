@@ -5,7 +5,7 @@ import { and, eq } from 'drizzle-orm'
 import type { AppConfig } from '../../../config/index.js'
 import type { Database } from '../../../db/index.js'
 import * as schema from '../../../db/schema.js'
-import { assessmentVersions, invitations, organizationMemberships, users } from '../../../db/schema.js'
+import { assessments, invitations, organizationMemberships, users } from '../../../db/schema.js'
 import { hashInvitationToken } from '../../invitations/index.js'
 
 type MagicLinkSender = (input: {
@@ -51,11 +51,11 @@ export function createAuth(
 
           if (typeof invitationToken === 'string') {
             const [invitation] = await db.select({
-              assessmentName: assessmentVersions.name,
+              assessmentName: assessments.name,
               expiresAt: invitations.expiresAt,
             }).from(invitations).innerJoin(
-              assessmentVersions,
-              eq(invitations.assessmentVersionId, assessmentVersions.id),
+              assessments,
+              eq(invitations.assessmentId, assessments.id),
             ).where(and(
               eq(invitations.tokenHash, hashInvitationToken(invitationToken)),
               eq(invitations.email, normalizedEmail),

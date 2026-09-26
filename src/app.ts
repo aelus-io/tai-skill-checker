@@ -9,11 +9,11 @@ import type { AppConfig } from './config/index.js'
 import type { Database } from './db/index.js'
 import type { Auth } from './modules/auth/index.js'
 import type { EvaluationService } from './modules/evaluation/index.js'
+import type { AttemptService } from './modules/attempts/index.js'
+import type { LiveKitService } from './modules/livekit/index.js'
 import { createAssessmentGenerator, createAssessmentService, createCoverImageService } from './modules/assessments/index.js'
 import { createInvitationService } from './modules/invitations/index.js'
-import { createAttemptService } from './modules/attempts/index.js'
 import { createAgentSettingsService } from './modules/agent-settings/index.js'
-import { createLiveKitService } from './modules/livekit/index.js'
 import { createRecordingService } from './modules/recordings/index.js'
 import { createResourceService } from './modules/resources/index.js'
 import { createErrorHandler, notFoundHandler } from './http/error-handler.js'
@@ -25,8 +25,8 @@ import { createAttemptRouter } from './http/routes/attempts.js'
 import { createEvaluationRouter } from './http/routes/evaluations.js'
 import { createAgentSettingsRouter } from './http/routes/agent-settings.js'
 
-export function createApp(dependencies: { config: AppConfig; db: Database; auth: Auth; logger: Logger; evaluations: EvaluationService }) {
-  const { config, db, auth, logger, evaluations } = dependencies
+export function createApp(dependencies: { config: AppConfig; db: Database; auth: Auth; logger: Logger; evaluations: EvaluationService; attempts: AttemptService; livekit: LiveKitService }) {
+  const { config, db, auth, logger, evaluations, attempts, livekit } = dependencies
   const app = express()
 
   app.disable('x-powered-by')
@@ -60,8 +60,6 @@ export function createApp(dependencies: { config: AppConfig; db: Database; auth:
 
   // Better Auth must receive the request before Express consumes its body.
   app.all('/api/auth/*splat', toNodeHandler(auth))
-  const attempts = createAttemptService(db, config.maxAssessmentAttempts)
-  const livekit = createLiveKitService(db, config)
   const agentSettings = createAgentSettingsService(db)
   const recordings = createRecordingService(db, config)
   const coverImages = createCoverImageService(db, config)

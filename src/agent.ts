@@ -2,7 +2,7 @@ import { AgentSession, AgentSessionEventTypes, defineAgent } from '@livekit/agen
 import * as google from '@livekit/agents-plugin-google'
 import { loadConfig } from './config/index.js'
 import { createDatabase } from './db/index.js'
-import { createAgentPreview, createAssessmentTools, createInterviewerAgent } from './modules/agent/index.js'
+import { createAgentPreview, createAssessmentTools, createAttemptSessionFinalizer, createInactivityTimer, createInterviewerAgent, deliverClosingMessageAndShutdown } from './modules/agent/index.js'
 import { createAgentSettingsService, type AgentSettings } from './modules/agent-settings/index.js'
 import { createAttemptService } from './modules/attempts/index.js'
 import { createResourceService } from './modules/resources/index.js'
@@ -39,17 +39,43 @@ export default defineAgent({
     const trusted = parseDispatchMetadata(ctx.job.metadata)
     const database = createDatabase(config)
     const pendingWrites = new Set<Promise<void>>()
+    let finalizeIncompleteAttempt = async () => {}
     ctx.addShutdownCallback(async () => {
-      await Promise.allSettled([...pendingWrites])
-      await database.close()
+      try {
+        await Promise.allSettled([...pendingWrites])
+        await finalizeIncompleteAttempt()
+      } finally {
+        await database.close()
+      }
     })
     const settings = await createAgentSettingsService(database.db).get(trusted.organizationId)
     const realtime = createRealtimeModel(config, settings)
     const session = new AgentSession({ llm: realtime })
 
+    // End the room when nobody has spoken for the configured period, so idle sessions do not hold LiveKit and Gemini capacity.
+    let onInactive = async () => {}
+    const inactivity = createInactivityTimer(config.livekitInactivityTimeoutSeconds * 1000, () => {
+      void onInactive().finally(async () => {
+        await ctx.deleteRoom().catch(() => undefined)
+        ctx.shutdown('no audio activity')
+      })
+    })
+    ctx.addShutdownCallback(async () => { inactivity.stop() })
+    session.on(AgentSessionEventTypes.UserStateChanged, (event) => { inactivity.setSpeaking('user', event.newState === 'speaking') })
+    session.on(AgentSessionEventTypes.AgentStateChanged, (event) => { inactivity.setSpeaking('agent', event.newState === 'speaking' || event.newState === 'thinking') })
+    let handleSessionClose = async (_reason: string) => {}
+    let sessionCloseHandled = false
+    session.on(AgentSessionEventTypes.Close, (event) => {
+      if (sessionCloseHandled) return
+      sessionCloseHandled = true
+      inactivity.stop()
+      void handleSessionClose(String(event.reason)).finally(() => { ctx.shutdown(`agent session closed: ${String(event.reason)}`) })
+    })
+
     if (trusted.mode === 'test') {
-      await session.start({ room: ctx.room, agent: createAgentPreview(settings), record: false })
+      await session.start({ room: ctx.room, agent: createAgentPreview(settings), record: false, inputOptions: { closeOnDisconnect: true, deleteRoomOnClose: true } })
       await ctx.connect()
+      inactivity.start()
       await session.generateReply({ instructions: `Say this welcome message exactly: "${settings.welcomeMessage}"` }).waitForPlayout()
       return
     }
@@ -60,8 +86,26 @@ export default defineAgent({
     if (authoritative.attempt.assessmentId !== trusted.assessmentId || authoritative.attempt.assessmentVersionId !== trusted.assessmentVersionId || authoritative.attempt.status !== 'IN_PROGRESS') throw new Error('Agent dispatch does not match an active attempt')
     const currentScenario = authoritative.scenarios.find((scenario) => scenario.id === authoritative.attempt.currentScenarioId)
     if (!currentScenario) throw new Error('Active attempt has no current scenario')
-    let assessmentCompleted = false
-    const tools = createAssessmentTools(trusted, attempts, resources, () => { assessmentCompleted = true })
+    const finalizer = createAttemptSessionFinalizer(async (reason) => {
+      await attempts.transition({
+        organizationId: trusted.organizationId,
+        attemptId: trusted.attemptId,
+        to: 'ABANDONED',
+        eventType: reason.eventType,
+        idempotencyKey: 'agent-session-ended',
+        ...(reason.payload ? { payload: reason.payload } : {}),
+      })
+    })
+    finalizeIncompleteAttempt = () => finalizer.abandon({ eventType: 'SESSION_DISCONNECTED', payload: { reason: 'agent_job_shutdown' } })
+    handleSessionClose = (reason) => finalizer.abandon({ eventType: 'SESSION_DISCONNECTED', payload: { reason } })
+    const tools = createAssessmentTools(trusted, attempts, resources, () => {
+      finalizer.markCompleted()
+      inactivity.stop()
+      void deliverClosingMessageAndShutdown(session, settings.closingMessage, () => { ctx.shutdown('assessment completed') })
+    })
+    onInactive = async () => {
+      await finalizer.abandon({ eventType: 'SESSION_INACTIVITY_TIMEOUT', payload: { timeoutSeconds: config.livekitInactivityTimeoutSeconds } })
+    }
     const persist = (operation: Promise<unknown>) => {
       const tracked = operation.then(() => undefined).catch(() => { ctx.shutdown('authoritative state persistence failed') }).finally(() => { pendingWrites.delete(tracked) })
       pendingWrites.add(tracked)
@@ -75,11 +119,16 @@ export default defineAgent({
     })
     session.on(AgentSessionEventTypes.AgentStateChanged, (event) => {
       persist(attempts.recordEvent({ organizationId: trusted.organizationId, attemptId: trusted.attemptId, type: 'AGENT_STATE_CHANGED', payload: { state: event.newState } }))
-      if (assessmentCompleted && event.newState === 'listening') ctx.shutdown('assessment completed')
     })
     session.on(AgentSessionEventTypes.Error, (event) => { persist(attempts.recordEvent({ organizationId: trusted.organizationId, attemptId: trusted.attemptId, type: 'AGENT_ERROR', payload: { message: String(event.error) } })) })
-    await session.start({ room: ctx.room, agent: createInterviewerAgent({ assessmentName: authoritative.assessment.name, currentScenario, tools, settings }), record: false })
+    await session.start({
+      room: ctx.room,
+      agent: createInterviewerAgent({ assessmentName: authoritative.assessment.name, currentScenario, tools, settings }),
+      record: false,
+      inputOptions: { closeOnDisconnect: true, deleteRoomOnClose: true },
+    })
     await ctx.connect()
+    inactivity.start()
     await session.generateReply({ instructions: `Begin with this exact welcome message: "${settings.welcomeMessage}" Then briefly explain that the assessment has started and ask the current scenario question.` })
   },
 })

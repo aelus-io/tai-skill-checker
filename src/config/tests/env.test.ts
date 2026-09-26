@@ -16,7 +16,7 @@ const valid = {
 describe('environment configuration', () => {
   it('applies safe operational defaults', () => {
     const config = loadConfig(valid)
-    expect(config).toMatchObject({ port: 3000, invitationTtlHours: 168, magicLinkTtlMinutes: 15, maxPdfBytes: 10 * 1024 * 1024 })
+    expect(config).toMatchObject({ port: 3000, invitationTtlHours: 168, magicLinkTtlMinutes: 15, maxPdfBytes: 10 * 1024 * 1024, livekitInactivityTimeoutSeconds: 300 })
   })
 
   it('requires a sender address when Resend is enabled', () => {

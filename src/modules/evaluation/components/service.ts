@@ -46,10 +46,12 @@ export function createEvaluationService(db: Database, model: EvaluationModel) {
   async function loadInput(claim: ClaimedEvaluation): Promise<EvaluationInput> {
     const [context] = await db.select({
       attemptId: attempts.id, organizationId: attempts.organizationId, assessmentId: attempts.assessmentId,
-      versionId: assessmentVersions.id, versionNumber: assessmentVersions.versionNumber, name: assessmentVersions.name,
+      versionId: assessmentVersions.id, versionNumber: assessmentVersions.versionNumber, name: assessments.name,
       description: assessmentVersions.description, preparationInstructions: assessmentVersions.preparationInstructions,
     }).from(attempts).innerJoin(assessmentVersions, and(
       eq(assessmentVersions.id, attempts.assessmentVersionId), eq(assessmentVersions.organizationId, attempts.organizationId),
+    )).innerJoin(assessments, and(
+      eq(assessments.id, attempts.assessmentId), eq(assessments.organizationId, attempts.organizationId),
     )).where(and(eq(attempts.id, claim.attemptId), eq(attempts.organizationId, claim.organizationId), eq(attempts.status, 'PROCESSING'))).limit(1)
     if (!context) throw new EvaluationExecutionError('Evaluation input is unavailable')
 
@@ -133,7 +135,7 @@ export function createEvaluationService(db: Database, model: EvaluationModel) {
   async function list(organizationId: string, filters: { status?: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | undefined; assessmentId?: string | undefined }) {
     return db.select({
       id: evaluations.id, attemptId: evaluations.attemptId, status: evaluations.status, overallScore: evaluations.overallScore,
-      employeeName: users.name, employeeEmail: users.email, assessmentId: assessments.id, assessmentName: assessmentVersions.name,
+      employeeName: users.name, employeeEmail: users.email, assessmentId: assessments.id, assessmentName: assessments.name,
       versionNumber: assessmentVersions.versionNumber, completedAt: attempts.completedAt, updatedAt: evaluations.updatedAt,
     }).from(evaluations)
       .innerJoin(attempts, and(eq(attempts.id, evaluations.attemptId), eq(attempts.organizationId, evaluations.organizationId)))

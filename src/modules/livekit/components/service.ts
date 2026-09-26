@@ -147,6 +147,17 @@ export function createLiveKitService(db: Database, config: LiveKitConfig) {
     await Promise.allSettled([...new Set(roomNames)].map((roomName) => roomClient.deleteRoom(roomName)))
   }
 
+  async function roomPresence(roomName: string, participantIdentity: string) {
+    const livekit = requireConfig()
+    const roomClient = new RoomServiceClient(livekit.url, livekit.key, livekit.secret)
+    const rooms = await roomClient.listRooms([roomName])
+    if (!rooms.length) return 'MISSING' as const
+    const participants = await roomClient.listParticipants(roomName)
+    return participants.some((participant) => participant.identity === participantIdentity)
+      ? 'PARTICIPANT_PRESENT' as const
+      : 'PARTICIPANT_ABSENT' as const
+  }
+
   function receiver() { const c = requireConfig(); return new WebhookReceiver(c.key, c.secret) }
   async function receiveWebhook(body: string, authorization?: string) { return receiver().receive(body, authorization) }
 
@@ -167,6 +178,6 @@ export function createLiveKitService(db: Database, config: LiveKitConfig) {
     }
   }
 
-  return { provision, observerToken, createAgentTestSession, closeAgentTestSession, closeRooms, receiveWebhook, applyRecordingWebhook }
+  return { provision, observerToken, createAgentTestSession, closeAgentTestSession, closeRooms, roomPresence, receiveWebhook, applyRecordingWebhook }
 }
 export type LiveKitService = ReturnType<typeof createLiveKitService>

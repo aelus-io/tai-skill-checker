@@ -130,6 +130,7 @@ export const assessmentVersions = pgTable('assessment_versions', {
   organizationId: uuid('organization_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
   assessmentId: uuid('assessment_id').notNull().references(() => assessments.id, { onDelete: 'restrict' }),
   versionNumber: integer('version_number').notNull(),
+  // Publication-time audit snapshot. Current display names come from assessments.name.
   name: text('name').notNull(),
   description: text('description').notNull(),
   preparationInstructions: text('preparation_instructions').notNull(),

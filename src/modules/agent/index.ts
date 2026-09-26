@@ -1,2 +1,5 @@
 export { createAssessmentTools } from './components/tools.js'
 export { createAgentPreview, createInterviewerAgent } from './components/interviewer.js'
+export { createInactivityTimer } from './components/inactivity.js'
+export { createAttemptSessionFinalizer, deliverClosingMessageAndShutdown } from './components/session-lifecycle.js'
+export type { AttemptEndReason } from './components/session-lifecycle.js'

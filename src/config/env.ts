@@ -42,6 +42,7 @@ const EnvSchema = z.object({
   LIVEKIT_API_SECRET: optional(z.string().min(1)),
   LIVEKIT_AGENT_NAME: z.string().min(1).default('assessment-interviewer'),
   LIVEKIT_TOKEN_TTL_SECONDS: z.coerce.number().int().min(60).max(3600).default(300),
+  LIVEKIT_INACTIVITY_TIMEOUT_SECONDS: z.coerce.number().int().min(30).max(3600).default(300),
   R2_ENDPOINT: optional(z.url()),
   R2_ACCESS_KEY_ID: optional(z.string().min(1)),
   R2_SECRET_ACCESS_KEY: optional(z.string().min(1)),
@@ -91,6 +92,7 @@ export type AppConfig = {
   livekitApiSecret?: string
   livekitAgentName: string
   livekitTokenTtlSeconds: number
+  livekitInactivityTimeoutSeconds: number
   r2Endpoint?: string
   r2AccessKeyId?: string
   r2SecretAccessKey?: string
@@ -135,6 +137,7 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
     ...(env.LIVEKIT_API_SECRET ? { livekitApiSecret: env.LIVEKIT_API_SECRET } : {}),
     livekitAgentName: env.LIVEKIT_AGENT_NAME,
     livekitTokenTtlSeconds: env.LIVEKIT_TOKEN_TTL_SECONDS,
+    livekitInactivityTimeoutSeconds: env.LIVEKIT_INACTIVITY_TIMEOUT_SECONDS,
     ...(env.R2_ENDPOINT ? { r2Endpoint: env.R2_ENDPOINT } : {}),
     ...(env.R2_ACCESS_KEY_ID ? { r2AccessKeyId: env.R2_ACCESS_KEY_ID } : {}),
     ...(env.R2_SECRET_ACCESS_KEY ? { r2SecretAccessKey: env.R2_SECRET_ACCESS_KEY } : {}),

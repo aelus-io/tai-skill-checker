@@ -71,10 +71,11 @@ export function createAssessmentService(db: Database) {
       db.select({ id: resources.id, filename: resources.filename, mimeType: resources.mimeType, byteSize: resources.byteSize, status: resources.status, createdAt: resources.createdAt }).from(resources).where(and(eq(resources.organizationId, organizationId), eq(resources.assessmentId, assessmentId), isNull(resources.assessmentVersionId))),
       db.select().from(assessmentVersions).where(and(eq(assessmentVersions.organizationId, organizationId), eq(assessmentVersions.assessmentId, assessmentId))).orderBy(asc(assessmentVersions.versionNumber)),
     ])
-    return { ...withCoverImageUrl(assessment), scenarios: draftScenarios, competencies: draftCompetencies, rubrics: draftRubrics, scenarioCompetencies: mappings, resources: attachedResources, versions }
+    return { ...withCoverImageUrl(assessment), scenarios: draftScenarios, competencies: draftCompetencies, rubrics: draftRubrics, scenarioCompetencies: mappings, resources: attachedResources, versions: versions.map((version) => ({ ...version, name: assessment.name })) }
   }
 
   async function getVersion(organizationId: string, assessmentId: string, versionId: string) {
+    const assessment = await requireAssessment(organizationId, assessmentId)
     const [version] = await db.select().from(assessmentVersions).where(and(
       eq(assessmentVersions.id, versionId), eq(assessmentVersions.assessmentId, assessmentId), eq(assessmentVersions.organizationId, organizationId),
     )).limit(1)
@@ -86,7 +87,7 @@ export function createAssessmentService(db: Database) {
       db.select().from(scenarioCompetencies).where(and(eq(scenarioCompetencies.organizationId, organizationId), eq(scenarioCompetencies.assessmentVersionId, versionId))),
       db.select({ id: resources.id, filename: resources.filename, mimeType: resources.mimeType, byteSize: resources.byteSize, status: resources.status, createdAt: resources.createdAt }).from(resources).where(and(eq(resources.organizationId, organizationId), eq(resources.assessmentVersionId, versionId))),
     ])
-    return { ...version, scenarios: versionScenarios, competencies: versionCompetencies, rubrics: versionRubrics, scenarioCompetencies: mappings, resources: versionResources }
+    return { ...version, name: assessment.name, scenarios: versionScenarios, competencies: versionCompetencies, rubrics: versionRubrics, scenarioCompetencies: mappings, resources: versionResources }
   }
 
   async function addScenario(input: Scope & { assessmentId: string; title: string; prompt: string; followUpGuidance: string; position: number }) {

@@ -201,10 +201,13 @@ export function createInvitationService(
       emailSentAt: invitations.emailSentAt,
       email: invitations.email,
       assessmentVersionId: invitations.assessmentVersionId,
-      name: assessmentVersions.name,
+      name: assessments.name,
       description: assessmentVersions.description,
       preparationInstructions: assessmentVersions.preparationInstructions,
-    }).from(invitations).innerJoin(assessmentVersions, eq(invitations.assessmentVersionId, assessmentVersions.id)).where(eq(invitations.tokenHash, tokenHash)).limit(1)
+    }).from(invitations)
+      .innerJoin(assessmentVersions, eq(invitations.assessmentVersionId, assessmentVersions.id))
+      .innerJoin(assessments, eq(invitations.assessmentId, assessments.id))
+      .where(eq(invitations.tokenHash, tokenHash)).limit(1)
     if (!row) throw new NotFoundError('Invitation')
     if (row.status !== 'PENDING') throw new ConflictError('INVITATION_UNAVAILABLE', 'This invitation is no longer available')
     if (row.expiresAt <= new Date()) {

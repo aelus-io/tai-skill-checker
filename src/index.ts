@@ -8,6 +8,8 @@ import { createNotificationService } from './modules/notifications/index.js'
 import { createOrganizationService } from './modules/organizations/index.js'
 import Anthropic from '@anthropic-ai/sdk'
 import { createAnthropicEvaluator, createEvaluationService, createEvaluationWorker } from './modules/evaluation/index.js'
+import { createAttemptService } from './modules/attempts/index.js'
+import { createLiveKitService, createOrphanSessionReaper } from './modules/livekit/index.js'
 
 const config = loadConfig()
 const logger = createLogger(config)
@@ -32,12 +34,21 @@ const anthropic = config.anthropicApiKey ? new Anthropic({
 const evaluator = createAnthropicEvaluator({ ...(anthropic ? { client: anthropic } : {}), ...(config.anthropicEvaluationModel ? { model: config.anthropicEvaluationModel } : {}) })
 const evaluations = createEvaluationService(database.db, evaluator)
 const evaluationWorker = createEvaluationWorker(evaluations, logger)
-const app = createApp({ config, db: database.db, auth, logger, evaluations })
+const attempts = createAttemptService(database.db, config.maxAssessmentAttempts)
+const livekit = createLiveKitService(database.db, config)
+const orphanSessionReaper = createOrphanSessionReaper({
+  attempts,
+  livekit,
+  logger,
+  timeoutMs: Math.max(config.livekitInactivityTimeoutSeconds, config.livekitTokenTtlSeconds) * 1_000,
+})
+const app = createApp({ config, db: database.db, auth, logger, evaluations, attempts, livekit })
 const server = createServer(app)
 let shuttingDown = false
 
 server.listen(config.port, () => {
   evaluationWorker.start()
+  orphanSessionReaper.start()
   logger.info({ port: config.port }, 'Backend listening')
 })
 
@@ -49,6 +60,7 @@ async function shutdown(signal: string) {
     server.close((error) => resolve(error))
   })
   await evaluationWorker.stop()
+  await orphanSessionReaper.stop()
   const error = await closeServer
   await database.close()
   if (error) {
