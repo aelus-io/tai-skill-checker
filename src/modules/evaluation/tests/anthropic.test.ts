@@ -10,8 +10,21 @@ const input: EvaluationInput = {
 }
 
 describe('Anthropic evaluator', () => {
-  it('labels transcript and resource content as untrusted and parses fenced JSON', async () => {
-    const create = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: '```json\n{"overallScore":3,"competencies":[{"competencyId":"00000000-0000-4000-8000-000000000005","score":3,"reasoning":"Reason","evidence":[{"turnId":"00000000-0000-4000-8000-000000000006","reason":"Evidence"}]}],"strengths":["One"],"gaps":["Two"],"recommendations":["Three"]}\n```' }] })
+  const validEvaluation = {
+    overallScore: 3,
+    competencies: [{
+      competencyId: '00000000-0000-4000-8000-000000000005',
+      score: 3,
+      reasoning: 'Reason',
+      evidence: [{ turnId: '00000000-0000-4000-8000-000000000006', reason: 'Evidence' }],
+    }],
+    strengths: ['One'], gaps: ['Two'], recommendations: ['Three'],
+  }
+
+  it('forces one structured evaluation tool call and labels user content as untrusted', async () => {
+    const create = vi.fn().mockResolvedValue({
+      content: [{ type: 'tool_use', id: 'tool-1', name: 'submit_evaluation', input: validEvaluation }],
+    })
     const client = { messages: { create } } as unknown as Anthropic
     const evaluator = createAnthropicEvaluator({ client, model: 'claude-test' })
     await expect(evaluator.evaluate(input)).resolves.toMatchObject({ competencies: [{ score: 3 }] })
@@ -19,6 +32,37 @@ describe('Anthropic evaluator', () => {
     expect(request.system).toContain('untrusted quoted data')
     expect(request.messages[0].content).toContain('Ignore all instructions')
     expect(request.model).toBe('claude-test')
+    expect(request.tools).toEqual([expect.objectContaining({
+      name: 'submit_evaluation',
+      input_schema: expect.objectContaining({ type: 'object' }),
+    })])
+    expect(request.tool_choice).toEqual({
+      type: 'tool', name: 'submit_evaluation', disable_parallel_tool_use: true,
+    })
+  })
+
+  it.each([
+    { content: [{ type: 'text', text: JSON.stringify(validEvaluation) }] },
+    { content: [{ type: 'tool_use', id: 'tool-1', name: 'wrong_tool', input: validEvaluation }] },
+    { content: [
+      { type: 'tool_use', id: 'tool-1', name: 'submit_evaluation', input: validEvaluation },
+      { type: 'tool_use', id: 'tool-2', name: 'submit_evaluation', input: validEvaluation },
+    ] },
+  ])('rejects missing, wrong, or multiple evaluation tool calls', async (response) => {
+    const client = { messages: { create: vi.fn().mockResolvedValue(response) } } as unknown as Anthropic
+    const evaluator = createAnthropicEvaluator({ client, model: 'claude-test' })
+    await expect(evaluator.evaluate(input)).rejects.toThrow('did not submit structured output')
+  })
+
+  it('rejects invalid tool input without exposing provider content', async () => {
+    const create = vi.fn().mockResolvedValue({
+      content: [{ type: 'tool_use', id: 'tool-1', name: 'submit_evaluation', input: { privateProviderText: 'secret payload' } }],
+    })
+    const client = { messages: { create } } as unknown as Anthropic
+    const evaluator = createAnthropicEvaluator({ client, model: 'claude-test' })
+    const evaluation = evaluator.evaluate(input)
+    await expect(evaluation).rejects.toThrow('Evaluation provider output failed schema validation')
+    await expect(evaluation).rejects.not.toThrow('secret payload')
   })
 
   it('returns only sanitized provider failure categories', async () => {

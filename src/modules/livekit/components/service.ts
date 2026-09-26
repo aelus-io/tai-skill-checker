@@ -7,6 +7,7 @@ import type { Database } from '../../../db/index.js'
 import { attempts, recordings } from '../../../db/schema.js'
 import { AppError, ConfigurationError, ConflictError, NotFoundError } from '../../../http/errors.js'
 import type { StartedAttempt } from '../../attempts/index.js'
+import { normalizeR2Endpoint, syncRecordingFromEgress } from '../../recordings/index.js'
 
 type LiveKitConfig = Pick<AppConfig, 'livekitUrl' | 'livekitApiKey' | 'livekitApiSecret' | 'livekitAgentName' | 'livekitTokenTtlSeconds' | 'r2Endpoint' | 'r2AccessKeyId' | 'r2SecretAccessKey' | 'r2BucketName'>
 
@@ -92,17 +93,20 @@ export function createLiveKitService(db: Database, config: LiveKitConfig) {
     try {
       await dispatchClient.createDispatch(attempt.roomName, config.livekitAgentName, { metadata: JSON.stringify({ organizationId: attempt.organizationId, assessmentId: attempt.assessmentId, assessmentVersionId: attempt.assessmentVersionId, attemptId: attempt.id }) })
       const storageKey = `recordings/${attempt.organizationId}/${attempt.assessmentId}/${attempt.id}/recording.ogg`
-      const output = new EncodedFileOutput({ fileType: EncodedFileType.OGG, filepath: storageKey, output: { case: 's3', value: new S3Upload({ accessKey: config.r2AccessKeyId, secret: config.r2SecretAccessKey, endpoint: config.r2Endpoint, bucket: config.r2BucketName, region: 'auto', forcePathStyle: true }) } })
+      const output = new EncodedFileOutput({ fileType: EncodedFileType.OGG, filepath: storageKey, output: { case: 's3', value: new S3Upload({ accessKey: config.r2AccessKeyId, secret: config.r2SecretAccessKey, endpoint: normalizeR2Endpoint(config.r2Endpoint, config.r2BucketName), bucket: config.r2BucketName, region: 'auto', forcePathStyle: true }) } })
       const egress = await egressClient.startRoomCompositeEgress(attempt.roomName, output, { audioOnly: true })
-      const egressStatus = await waitForRealtimeInfrastructure({ roomName: attempt.roomName, egressId: egress.egressId, roomClient, egressClient })
       await db.insert(recordings).values({
         organizationId: attempt.organizationId,
         attemptId: attempt.id,
         storageKey,
         mimeType: 'audio/ogg',
         egressId: egress.egressId,
-        status: egressStatus === EgressStatus.EGRESS_ACTIVE ? 'ACTIVE' : 'STARTING',
+        status: 'STARTING',
       })
+      const egressStatus = await waitForRealtimeInfrastructure({ roomName: attempt.roomName, egressId: egress.egressId, roomClient, egressClient })
+      if (egressStatus === EgressStatus.EGRESS_ACTIVE) {
+        await db.update(recordings).set({ status: 'ACTIVE' }).where(eq(recordings.egressId, egress.egressId))
+      }
       return { token: await token(attempt.roomName, `employee-${attempt.employeeUserId}`, { role: 'employee', attemptId: attempt.id }, false), url: livekit.participantUrl }
     } catch (error) {
       await roomClient.deleteRoom(attempt.roomName).catch(() => undefined)
@@ -164,18 +168,7 @@ export function createLiveKitService(db: Database, config: LiveKitConfig) {
   async function applyRecordingWebhook(event: WebhookEvent) {
     const info = event.egressInfo
     if (!info?.egressId) return
-    const [recording] = await db.select().from(recordings).where(eq(recordings.egressId, info.egressId)).limit(1)
-    if (!recording) return
-    if (event.event === 'egress_started' || event.event === 'egress_updated') {
-      await db.update(recordings).set({ status: 'ACTIVE' }).where(eq(recordings.id, recording.id))
-    } else if (event.event === 'egress_ended') {
-      const failed = info.error !== ''
-      const file = info.fileResults[0]
-      await db.update(recordings).set({
-        status: failed ? 'FAILED' : 'COMPLETED', errorMessage: failed ? info.error.slice(0, 1000) : null,
-        completedAt: new Date(), ...(file ? { byteSize: Number(file.size), durationSeconds: Math.round(Number(file.duration) / 1_000_000_000) } : {}),
-      }).where(eq(recordings.id, recording.id))
-    }
+    await syncRecordingFromEgress(db, info)
   }
 
   return { provision, observerToken, createAgentTestSession, closeAgentTestSession, closeRooms, roomPresence, receiveWebhook, applyRecordingWebhook }
