@@ -12,10 +12,10 @@ describe('notification email templates', () => {
       expiresAt,
     })
 
-    expect(email.subject).toBe("You're invited: Applied AI Foundations")
+    expect(email.subject).toBe('TAI Skill Checker assessment: Applied AI Foundations')
     expect(email.html).toContain('src="https://app.taiskill.berl.dev/assets/logo-BivntQtA.png"')
     expect(email.html).toContain('TAI <span style="color:#666d78; font-weight:600;">Skill Checker</span>')
-    expect(email.html).toContain('View assessment')
+    expect(email.html).toContain('Open assessment')
     expect(email.html).toContain('Applied AI Foundations')
     expect(email.text).toContain('https://example.com/invite/token')
     expect(email.text).toContain('Sep 24, 2026, 2:30 PM UTC')
@@ -30,10 +30,10 @@ describe('notification email templates', () => {
       expiresAt,
     })
 
-    expect(email.subject).toBe('Your secure sign-in link')
+    expect(email.subject).toBe('Your TAI Skill Checker sign-in link')
     expect(email.html).toContain('Welcome back')
-    expect(email.html).toContain('Sign in securely')
-    expect(email.text).toContain('If you did not request this sign-in link')
+    expect(email.html).toContain('Sign in')
+    expect(email.text).toContain('If you did not request this link')
   })
 
   it('escapes assessment content and link attributes in HTML', () => {

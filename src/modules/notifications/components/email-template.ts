@@ -35,23 +35,23 @@ export function renderMagicLinkEmail(input: MagicLinkEmailInput) {
   const safeAssessmentName = escapeHtml(assessmentName)
   const safeMagicLinkUrl = escapeHtml(input.magicLinkUrl)
   const expiry = formatExpiry(input.expiresAt)
-  const subject = invitation ? `You're invited: ${assessmentName}` : 'Your secure sign-in link'
+  const subject = invitation ? `TAI Skill Checker assessment: ${assessmentName}` : 'Your TAI Skill Checker sign-in link'
   const preheader = invitation
-    ? `Open your invitation to complete ${assessmentName}.`
-    : 'Use this secure link to return to your assessment workspace.'
-  const eyebrow = invitation ? 'Assessment invitation' : 'Secure sign-in'
-  const heading = invitation ? 'You’ve been invited' : 'Welcome back'
+    ? `Start ${assessmentName} in TAI Skill Checker.`
+    : 'Your link to return to your assessment workspace.'
+  const eyebrow = invitation ? 'Assessment' : 'Sign in'
+  const heading = invitation ? 'Your assessment is ready' : 'Welcome back'
   const body = invitation
-    ? `You’ve been invited to complete <strong style="color:#0a0b0d;">${safeAssessmentName}</strong> in TAI Skill Checker.`
-    : 'Use the secure button below to return to your TAI Skill Checker assessment workspace.'
-  const action = invitation ? 'View assessment' : 'Sign in securely'
+    ? `You have been asked to complete <strong style="color:#0a0b0d;">${safeAssessmentName}</strong> in TAI Skill Checker.`
+    : 'Use the button below to return to your TAI Skill Checker assessment workspace.'
+  const action = invitation ? 'Open assessment' : 'Sign in'
   const ignored = invitation
-    ? 'If you were not expecting this invitation, you can safely ignore this email.'
-    : 'If you did not request this sign-in link, you can safely ignore this email.'
+    ? 'If you were not expecting this message, no action is needed.'
+    : 'If you did not request this link, no action is needed.'
 
   const text = invitation
-    ? `TAI Skill Checker\n\nYou’ve been invited to complete ${assessmentName}.\n\nView assessment: ${input.magicLinkUrl}\n\nThis private link expires on ${expiry}. Do not forward or share it.\n\n${ignored}`
-    : `TAI Skill Checker\n\nUse this secure link to return to your assessment workspace:\n${input.magicLinkUrl}\n\nThis private link expires on ${expiry}. Do not forward or share it.\n\n${ignored}`
+    ? `TAI Skill Checker\n\nYou have been asked to complete ${assessmentName}.\n\nOpen assessment: ${input.magicLinkUrl}\n\nThis link expires on ${expiry} and is for your use only.\n\n${ignored}`
+    : `TAI Skill Checker\n\nUse this link to return to your assessment workspace:\n${input.magicLinkUrl}\n\nThis link expires on ${expiry} and is for your use only.\n\n${ignored}`
 
   const html = `<!doctype html>
 <html lang="en">
@@ -100,12 +100,12 @@ export function renderMagicLinkEmail(input: MagicLinkEmailInput) {
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%; margin-top:30px;">
                 <tr>
                   <td style="padding:16px 18px; border-radius:12px; background:#f7f7f8; color:#666d78; font-size:13px; line-height:20px;">
-                    <strong style="color:#353a43;">Private link</strong><br>
-                    Expires ${escapeHtml(expiry)}. Do not forward or share this email.
+                    <strong style="color:#353a43;">Link expiry</strong><br>
+                    This link expires ${escapeHtml(expiry)} and is for your use only.
                   </td>
                 </tr>
               </table>
-              <p style="margin:24px 0 0; color:#7c828a; font-size:12px; line-height:19px;">If the button does not work, copy and paste this link into your browser:<br><a href="${safeMagicLinkUrl}" style="color:#c84c0d; word-break:break-all;">${safeMagicLinkUrl}</a></p>
+              <p style="margin:24px 0 0; color:#7c828a; font-size:12px; line-height:19px;">If the button does not work, open this address in your browser:<br><a href="${safeMagicLinkUrl}" style="color:#c84c0d; word-break:break-all;">${safeMagicLinkUrl}</a></p>
             </td>
           </tr>
           <tr>
